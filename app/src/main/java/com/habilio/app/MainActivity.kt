@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -181,7 +183,6 @@ object SupabaseService {
             conn.outputStream.use { it.write(bytes) }
 
             if (conn.responseCode in 200..299) {
-                // Devuelve la URL pública para guardarla en la tabla de evidencias
                 "$PROJECT_URL/storage/v1/object/public/evidencias/$nombreArchivo"
             } else {
                 null
@@ -224,6 +225,12 @@ object SupabaseService {
         return "${soloDigitos.ifBlank { "usuario" }}@habilio.app"
     }
 
+    private fun limpiarUrlJson(obj: JSONObject, campo: String): String? {
+        if (obj.isNull(campo)) return null
+        val valor = obj.optString(campo, "").trim()
+        return if (valor.isBlank() || valor.equals("null", ignoreCase = true)) null else valor
+    }
+
     private fun parsearPerfil(obj: JSONObject) = PerfilUsuario(
         id = obj.optString("id", ""),
         rol = obj.optString("rol", "cliente"),
@@ -239,7 +246,7 @@ object SupabaseService {
         descripcion = obj.optString("descripcion", ""),
         esPremium = obj.optBoolean("es_premium", true),
         calificacion = obj.optDouble("calificacion", 5.0).let { if (it.isNaN()) 5.0 else it },
-        fotoUrl = obj.optString("foto_url", "")
+        fotoUrl = limpiarUrlJson(obj, "foto_url") ?: ""
     )
 
     suspend fun registrarUsuario(
@@ -268,9 +275,8 @@ object SupabaseService {
                 val jsonAuth = JSONObject(authResp)
                 userId = jsonAuth.optJSONObject("user")?.optString("id").orEmpty()
                     .ifBlank { jsonAuth.optString("id", "") }
-            }
-
-            if (userId.isBlank()) {
+            } else {
+                // Si el correo ya estaba registrado en Auth, verificamos con su contraseña exacta
                 val (loginCode, loginResp) = peticionHttp(
                     "$AUTH_URL/token?grant_type=password",
                     "POST",
@@ -279,10 +285,16 @@ object SupabaseService {
                 )
                 if (loginCode in 200..299 && loginResp.isNotBlank()) {
                     userId = JSONObject(loginResp).optJSONObject("user")?.optString("id").orEmpty()
+                } else {
+                    return@withContext Result.failure(
+                        Exception("Este correo o teléfono ya está registrado con otra contraseña.")
+                    )
                 }
             }
 
-            if (userId.isBlank()) userId = UUID.randomUUID().toString()
+            if (userId.isBlank()) {
+                return@withContext Result.failure(Exception("No se pudo crear la cuenta en Supabase Auth."))
+            }
 
             val descripcionGenerada = if (rol == "trabajador") {
                 val detalleEsp = if (especialidad.isNotBlank()) " Especialidad: ${especialidad.trim()}." else ""
@@ -294,7 +306,7 @@ object SupabaseService {
                 put("rol", rol)
                 put("nombre", nombre.trim())
                 put("telefono", telefono.trim())
-                put("correo", correoInput.trim().ifBlank { correoFinal })
+                put("correo", correoFinal)
                 put("zona", zona.trim().ifBlank { "Pénjamo, Gto." })
                 put("direccion", direccion.trim().ifBlank { "Zona Centro, Pénjamo, Gto." })
                 if (rol == "trabajador") {
@@ -319,6 +331,11 @@ object SupabaseService {
         }
     }
 
+    /**
+     * INICIO DE SESIÓN ESTRICTO:
+     * Valida obligatoriamente la contraseña contra Supabase Auth (/auth/v1/token).
+     * Si la contraseña es incorrecta, rechaza el acceso de inmediato.
+     */
     suspend fun iniciarSesion(identificador: String, contrasena: String): Result<PerfilUsuario> =
         withContext(Dispatchers.IO) {
             try {
@@ -326,8 +343,9 @@ object SupabaseService {
                 var correoParaAuth = normalizarCorreo(limpio)
                 var perfilEncontrado: PerfilUsuario? = null
 
+                // 1. Buscar el perfil por correo o teléfono para conocer su email de Auth asociado
                 val filtro = if (limpio.contains("@")) {
-                    "correo=eq.${URLEncoder.encode(limpio, "UTF-8")}"
+                    "correo=eq.${URLEncoder.encode(limpio.lowercase(), "UTF-8")}"
                 } else {
                     "telefono=eq.${URLEncoder.encode(limpio, "UTF-8")}"
                 }
@@ -336,36 +354,69 @@ object SupabaseService {
                     val arr = JSONArray(respBusqueda)
                     if (arr.length() > 0) {
                         perfilEncontrado = parsearPerfil(arr.getJSONObject(0))
-                        if (perfilEncontrado.correo.contains("@")) correoParaAuth = perfilEncontrado.correo
+                        if (perfilEncontrado.correo.contains("@")) {
+                            correoParaAuth = perfilEncontrado.correo.trim().lowercase()
+                        }
                     }
                 }
 
+                // 2. Autenticar estrictamente con contraseña en Supabase Auth
                 val authPayload = JSONObject().apply {
                     put("email", correoParaAuth)
                     put("password", contrasena)
                 }
-                val (authCode, authResp) = peticionHttp(
+                var (authCode, authResp) = peticionHttp(
                     "$AUTH_URL/token?grant_type=password",
                     "POST",
                     authPayload.toString(),
                     false
                 )
 
-                if (authCode in 200..299 && authResp.isNotBlank()) {
-                    val uid = JSONObject(authResp).optJSONObject("user")?.optString("id").orEmpty()
-                    if (uid.isNotBlank()) {
-                        val (cPerfil, rPerfil) = peticionHttp("$REST_URL/perfiles?id=eq.$uid&select=*")
-                        if (cPerfil in 200..299 && rPerfil.isNotBlank()) {
-                            val arr = JSONArray(rPerfil)
-                            if (arr.length() > 0) return@withContext Result.success(parsearPerfil(arr.getJSONObject(0)))
+                // Si ingresó teléfono y su cuenta Auth fue creada con @habilio.app, probar también el correo sintético
+                if (authCode !in 200..299 && perfilEncontrado != null) {
+                    val correoTelefono = normalizarCorreo(perfilEncontrado.telefono)
+                    if (correoTelefono != correoParaAuth) {
+                        val segundoPayload = JSONObject().apply {
+                            put("email", correoTelefono)
+                            put("password", contrasena)
+                        }
+                        val segundoIntento = peticionHttp(
+                            "$AUTH_URL/token?grant_type=password",
+                            "POST",
+                            segundoPayload.toString(),
+                            false
+                        )
+                        authCode = segundoIntento.first
+                        authResp = segundoIntento.second
+                    }
+                }
+
+                // 3. Si Supabase Auth no devuelve 200 OK, la contraseña es INCORRECTA -> Denegar acceso
+                if (authCode !in 200..299 || authResp.isBlank()) {
+                    return@withContext Result.failure(
+                        Exception("Correo/teléfono o contraseña incorrectos. Verifica tus datos.")
+                    )
+                }
+
+                // 4. Contraseña válida: recuperar el perfil verificado del usuario
+                val uid = JSONObject(authResp).optJSONObject("user")?.optString("id").orEmpty()
+                if (uid.isNotBlank()) {
+                    val (cPerfil, rPerfil) = peticionHttp("$REST_URL/perfiles?id=eq.$uid&select=*")
+                    if (cPerfil in 200..299 && rPerfil.isNotBlank()) {
+                        val arr = JSONArray(rPerfil)
+                        if (arr.length() > 0) {
+                            return@withContext Result.success(parsearPerfil(arr.getJSONObject(0)))
                         }
                     }
                 }
 
-                if (perfilEncontrado != null) return@withContext Result.success(perfilEncontrado)
-                Result.failure(Exception("Credenciales incorrectas o usuario no encontrado."))
+                if (perfilEncontrado != null) {
+                    return@withContext Result.success(perfilEncontrado)
+                }
+
+                Result.failure(Exception("No se encontró el perfil asociado a esta cuenta."))
             } catch (e: Exception) {
-                Result.failure(e)
+                Result.failure(Exception("Error de conexión al verificar credenciales."))
             }
         }
 
@@ -393,7 +444,7 @@ object SupabaseService {
                         titulo = o.optString("titulo"),
                         ubicacion = o.optString("ubicacion", "Pénjamo, Gto."),
                         fechaPublicacion = o.optString("fecha_publicacion", "Reciente"),
-                        fotoUrl = o.optString("foto_url", null)
+                        fotoUrl = limpiarUrlJson(o, "foto_url")
                     )
                 }
             }
@@ -401,21 +452,25 @@ object SupabaseService {
         emptyList()
     }
 
-    suspend fun publicarEvidencia(trabajadorId: String, titulo: String, ubicacion: String, fotoUrl: String? = null): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val payload = JSONObject().apply {
-                    put("trabajador_id", trabajadorId)
-                    put("titulo", titulo.trim())
-                    put("ubicacion", ubicacion.ifBlank { "Pénjamo, Gto." })
-                    put("fecha_publicacion", "Verificado • $ubicacion")
-                    if (fotoUrl != null) put("foto_url", fotoUrl)
-                }
-                peticionHttp("$REST_URL/evidencias", "POST", payload.toString()).first in 200..299
-            } catch (_: Exception) {
-                false
+    suspend fun publicarEvidencia(
+        trabajadorId: String,
+        titulo: String,
+        ubicacion: String,
+        fotoUrl: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("trabajador_id", trabajadorId)
+                put("titulo", titulo.trim())
+                put("ubicacion", ubicacion.ifBlank { "Pénjamo, Gto." })
+                put("fecha_publicacion", "Verificado • $ubicacion")
+                if (!fotoUrl.isNullOrBlank()) put("foto_url", fotoUrl)
             }
+            peticionHttp("$REST_URL/evidencias", "POST", payload.toString()).first in 200..299
+        } catch (_: Exception) {
+            false
         }
+    }
 
     suspend fun obtenerResenas(trabajadorId: String? = null): List<ResenaItem> = withContext(Dispatchers.IO) {
         try {
@@ -606,6 +661,9 @@ fun HabilioApp() {
     var solicitudRecienConfirmada by remember { mutableStateOf<SolicitudItem?>(null) }
     var mostrarModalCalificar by remember { mutableStateOf(false) }
 
+    // Estado para abrir cualquier fotografía de evidencia en pantalla completa
+    var evidenciaEnPantallaCompleta by remember { mutableStateOf<EvidenciaItem?>(null) }
+
     fun recargarDatosGlobales() {
         scope.launch {
             cargandoDatos = true
@@ -706,6 +764,9 @@ fun HabilioApp() {
                         trabajadorSeleccionado = especialista
                         pantallaActual = RutaHabilio.DETALLE_ESPECIALISTA
                     },
+                    alClickFotoEvidencia = { ev ->
+                        if (!ev.fotoUrl.isNullOrBlank()) evidenciaEnPantallaCompleta = ev
+                    },
                     alIrAMiPerfil = {
                         recargarDatosGlobales()
                         pantallaActual = RutaHabilio.PERFIL_CLIENTE
@@ -727,6 +788,9 @@ fun HabilioApp() {
                             alVolverAlListado = { pantallaActual = RutaHabilio.BUSCADOR_CLIENTE },
                             alAbrirModalSolicitar = { mostrarModalCompra = true },
                             alAbrirModalCalificar = { mostrarModalCalificar = true },
+                            alClickFotoEvidencia = { ev ->
+                                if (!ev.fotoUrl.isNullOrBlank()) evidenciaEnPantallaCompleta = ev
+                            },
                             alIrAExplorar = { pantallaActual = RutaHabilio.BUSCADOR_CLIENTE },
                             alIrAMiPerfil = {
                                 recargarDatosGlobales()
@@ -807,6 +871,9 @@ fun HabilioApp() {
                             recargarDatosGlobales()
                         }
                     },
+                    alClickFotoEvidencia = { ev ->
+                        if (!ev.fotoUrl.isNullOrBlank()) evidenciaEnPantallaCompleta = ev
+                    },
                     alIrASolicitudes = {
                         recargarDatosGlobales()
                         pantallaActual = RutaHabilio.SOLICITUDES_TRABAJADOR
@@ -877,12 +944,20 @@ fun HabilioApp() {
                     }
                 )
             }
+
+            // Visor de foto a pantalla completa cuando el usuario o trabajador toca una evidencia
+            if (evidenciaEnPantallaCompleta != null) {
+                ModalVerFotoCompleta(
+                    evidencia = evidenciaEnPantallaCompleta!!,
+                    alCerrar = { evidenciaEnPantallaCompleta = null }
+                )
+            }
         }
     }
 }
 
 // ============================================================================
-// 4. COMPONENTES REUTILIZABLES OPTIMIZADOS (Sin duplicación de código)
+// 4. COMPONENTES REUTILIZABLES OPTIMIZADOS
 // ============================================================================
 
 @Composable
@@ -926,6 +1001,106 @@ fun HabilioTarjeta(
             modifier = modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(paddingInterno), content = contenido)
+        }
+    }
+}
+
+/**
+ * Visor modal para abrir cualquier fotografía de evidencia en tamaño completo.
+ */
+@Composable
+fun ModalVerFotoCompleta(
+    evidencia: EvidenciaItem,
+    alCerrar: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = alCerrar,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.92f))
+                .clickable(onClick = alCerrar)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = HabilioTheme.SuperficieTarjeta,
+                border = BorderStroke(1.dp, HabilioTheme.BordeTarjeta),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = false) {}
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = evidencia.titulo,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 16.sp,
+                                color = HabilioTheme.TextoPrimario
+                            )
+                            Text(
+                                text = "✓ ${evidencia.fechaPublicacion}",
+                                fontSize = 12.sp,
+                                color = HabilioTheme.VerdeExito
+                            )
+                        }
+                        IconButton(
+                            onClick = alCerrar,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(HabilioTheme.SuperficieElevada)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cerrar vista completa",
+                                tint = HabilioTheme.TextoPrimario
+                            )
+                        }
+                    }
+
+                    AsyncImage(
+                        model = evidencia.fotoUrl,
+                        contentDescription = evidencia.titulo,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 260.dp, max = 480.dp)
+                            .background(Color.Black)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📍 ${evidencia.ubicacion}",
+                            fontSize = 13.sp,
+                            color = HabilioTheme.TextoSecundario
+                        )
+                        TextButton(onClick = alCerrar) {
+                            Text(
+                                text = "Cerrar",
+                                color = HabilioTheme.AmarilloPrimario,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1489,9 +1664,7 @@ fun ModalSolicitarServicio(
     alCerrar: () -> Unit,
     alConfirmarSolicitud: (descripcion: String, ubicacion: String, presupuesto: Double) -> Unit
 ) {
-    var descripcion by remember {
-        mutableStateOf("")
-    }
+    var descripcion by remember { mutableStateOf("") }
     var ubicacion by remember { mutableStateOf(direccionInicial) }
     var presupuestoTexto by remember { mutableStateOf("0.00") }
     var enviando by remember { mutableStateOf(false) }
@@ -1832,9 +2005,7 @@ fun ModalEvaluarServicio(
 ) {
     var estrellasSeleccionadas by remember { mutableStateOf(5) }
     var autor by remember { mutableStateOf(nombreClienteInicial) }
-    var comentario by remember {
-        mutableStateOf("")
-    }
+    var comentario by remember { mutableStateOf("") }
     var publicando by remember { mutableStateOf(false) }
 
     val etiquetaEstrellas = when (estrellasSeleccionadas) {
@@ -2087,7 +2258,7 @@ private fun TarjetaSeleccionRol(
 }
 
 // ============================================================================
-// 7. PANTALLAS 2 Y 4 UNIFICADAS: LOGIN (Cliente y Trabajador en una sola función)
+// 7. PANTALLAS 2 Y 4 UNIFICADAS: LOGIN
 // ============================================================================
 @Composable
 fun PantallaLoginUnificada(
@@ -2159,7 +2330,7 @@ fun PantallaLoginUnificada(
             Spacer(modifier = Modifier.height(22.dp))
 
             val textoBoton = if (cargando) {
-                "Iniciando sesión..."
+                "Verificando credenciales..."
             } else if (esModoTrabajador) {
                 "Continuar como trabajador"
             } else {
@@ -2695,7 +2866,7 @@ fun PantallaRegistroTrabajador(
 }
 
 // ============================================================================
-// 10. PANTALLA 6: BUSCADOR DE ESPECIALISTAS DINÁMICO
+// 10. PANTALLA 6: BUSCADOR DE ESPECIALISTAS DINÁMICO (Con fotos reales y zoom)
 // ============================================================================
 @Composable
 fun PantallaBuscadorCliente(
@@ -2705,6 +2876,7 @@ fun PantallaBuscadorCliente(
     cargando: Boolean,
     alRefrescar: () -> Unit,
     alVerEspecialista: (PerfilUsuario) -> Unit,
+    alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alIrAMiPerfil: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
@@ -2852,6 +3024,7 @@ fun PantallaBuscadorCliente(
                         especialista = esp,
                         evidencias = evidencias.filter { it.trabajadorId == esp.id },
                         cantidadResenas = resenas.count { it.trabajadorId == esp.id },
+                        alClickFotoEvidencia = alClickFotoEvidencia,
                         alVerDetalle = { alVerEspecialista(esp) }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
@@ -2866,6 +3039,7 @@ private fun TarjetaEspecialistaBuscador(
     especialista: PerfilUsuario,
     evidencias: List<EvidenciaItem>,
     cantidadResenas: Int,
+    alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alVerDetalle: () -> Unit
 ) {
     HabilioTarjeta {
@@ -2927,36 +3101,52 @@ private fun TarjetaEspecialistaBuscador(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Miniaturas dinámicas de evidencia con imagen real (AsyncImage) y clic para ampliar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             for (index in 0 until 3) {
                 val ev = evidencias.getOrNull(index)
+                val tieneFoto = !ev?.fotoUrl.isNullOrBlank()
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(74.dp)
+                        .height(78.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(HabilioTheme.SuperficieElevada)
                         .border(1.dp, HabilioTheme.BordeTarjeta, RoundedCornerShape(8.dp))
-                        .padding(6.dp),
+                        .clickable(enabled = tieneFoto) {
+                            if (ev != null) alClickFotoEvidencia(ev)
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Outlined.Image,
-                            contentDescription = null,
-                            tint = if (ev != null) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoSecundario
+                    if (tieneFoto && ev != null) {
+                        AsyncImage(
+                            model = ev.fotoUrl,
+                            contentDescription = ev.titulo,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Text(
-                            text = ev?.titulo ?: "Evidencia ${index + 1}",
-                            fontSize = 10.sp,
-                            color = HabilioTheme.TextoSecundario,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center
-                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Image,
+                                contentDescription = null,
+                                tint = if (ev != null) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoSecundario
+                            )
+                            Text(
+                                text = ev?.titulo ?: "Sin foto",
+                                fontSize = 10.sp,
+                                color = HabilioTheme.TextoSecundario,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
@@ -2998,7 +3188,7 @@ private fun construirResumenLimpio(esp: PerfilUsuario): String {
 }
 
 // ============================================================================
-// 11. PANTALLA 7: DETALLE DE ESPECIALISTA
+// 11. PANTALLA 7: DETALLE DE ESPECIALISTA (Muestra fotos reales y abre visor)
 // ============================================================================
 @Composable
 fun PantallaDetalleEspecialista(
@@ -3009,6 +3199,7 @@ fun PantallaDetalleEspecialista(
     alVolverAlListado: () -> Unit,
     alAbrirModalSolicitar: () -> Unit,
     alAbrirModalCalificar: () -> Unit,
+    alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alIrAExplorar: () -> Unit,
     alIrAMiPerfil: () -> Unit
 ) {
@@ -3191,6 +3382,7 @@ fun PantallaDetalleEspecialista(
             )
 
             evidencias.forEach { ev ->
+                val tieneFoto = !ev.fotoUrl.isNullOrBlank()
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = HabilioTheme.SuperficieTarjeta,
@@ -3198,18 +3390,54 @@ fun PantallaDetalleEspecialista(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 14.dp)
+                        .clickable(enabled = tieneFoto) { alClickFotoEvidencia(ev) }
                 ) {
                     Column {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(140.dp)
-                                .background(HabilioTheme.SuperficieElevada),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(36.dp))
-                                Text("Evidencia fotográfica verificada", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                        if (tieneFoto) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                AsyncImage(
+                                    model = ev.fotoUrl,
+                                    contentDescription = ev.titulo,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .background(HabilioTheme.SuperficieElevada)
+                                )
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.padding(10.dp)
+                                ) {
+                                    Text(
+                                        text = "🔍 Toca para ampliar",
+                                        fontSize = 11.sp,
+                                        color = HabilioTheme.TextoPrimario,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .background(HabilioTheme.SuperficieElevada),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.PhotoCamera,
+                                        contentDescription = null,
+                                        tint = HabilioTheme.AmarilloPrimario,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Text(
+                                        text = "Evidencia registrada sin fotografía",
+                                        fontSize = 12.sp,
+                                        color = HabilioTheme.TextoSecundario
+                                    )
+                                }
                             }
                         }
                         Column(modifier = Modifier.padding(14.dp)) {
@@ -3885,6 +4113,7 @@ fun PantallaTallerTrabajador(
     evidencias: List<EvidenciaItem>,
     solicitudes: List<SolicitudItem>,
     alPublicarEvidencia: (String, Uri?) -> Unit,
+    alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alIrASolicitudes: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
@@ -4050,7 +4279,9 @@ fun PantallaTallerTrabajador(
                 } else {
                     OutlinedButton(
                         onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario)
                     ) {
@@ -4094,7 +4325,7 @@ fun PantallaTallerTrabajador(
             EstadoCargaOVacio(
                 cargando = false,
                 estaVacio = evidencias.isEmpty(),
-                mensajeVacio = "Aún no tienes evidencias publicadas. Escribe un título arriba y presiona 'Cargar Fotografía al Portafolio'."
+                mensajeVacio = "Aún no tienes evidencias publicadas. Escribe un título arriba y presiona 'Subir Evidencia'."
             )
 
             evidencias.chunked(2).forEach { fila ->
@@ -4105,25 +4336,27 @@ fun PantallaTallerTrabajador(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     fila.forEach { ev ->
+                        val tieneFoto = !ev.fotoUrl.isNullOrBlank()
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = HabilioTheme.SuperficieTarjeta,
                             border = BorderStroke(1.dp, HabilioTheme.BordeTarjeta),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = tieneFoto) { alClickFotoEvidencia(ev) }
                         ) {
                             Column {
-                                if (!ev.fotoUrl.isNullOrBlank()) {
-                                    coil.compose.AsyncImage(
+                                if (tieneFoto) {
+                                    AsyncImage(
                                         model = ev.fotoUrl,
                                         contentDescription = ev.titulo,
-                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        contentScale = ContentScale.Crop,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(100.dp)
                                             .background(HabilioTheme.SuperficieElevada)
                                     )
                                 } else {
-                                    // Si no tiene foto (registros antiguos), muestra el icono por defecto
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()

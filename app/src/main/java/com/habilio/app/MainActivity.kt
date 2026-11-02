@@ -1,10 +1,14 @@
 package com.habilio.app
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -122,7 +126,8 @@ data class EvidenciaItem(
     val trabajadorId: String,
     val titulo: String,
     val ubicacion: String,
-    val fechaPublicacion: String
+    val fechaPublicacion: String,
+    val fotoUrl: String? = null
 )
 
 data class ResenaItem(
@@ -154,6 +159,38 @@ object SupabaseService {
     private const val REST_URL = "$PROJECT_URL/rest/v1"
     private const val AUTH_URL = "$PROJECT_URL/auth/v1"
     private const val ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1cWl1emRrb2Jib210b29uYWNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1ODQ0NDEsImV4cCI6MjEwOTE2MDQ0MX0.0hCBoRTfYOYJmtUX6mgmGXm0eQTf1pbfk6anIGUONPg"
+
+    suspend fun subirFotoStorage(context: android.content.Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val bytes = inputStream.use { it.readBytes() }
+
+            val nombreArchivo = "${UUID.randomUUID()}.jpg"
+            val urlStorage = "$PROJECT_URL/storage/v1/object/evidencias/$nombreArchivo"
+
+            val conn = (URL(urlStorage).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20000
+                readTimeout = 20000
+                setRequestProperty("apikey", ANON_KEY)
+                setRequestProperty("Authorization", "Bearer $ANON_KEY")
+                setRequestProperty("Content-Type", "image/jpeg")
+                doOutput = true
+            }
+
+            conn.outputStream.use { it.write(bytes) }
+
+            if (conn.responseCode in 200..299) {
+                // Devuelve la URL pública para guardarla en la tabla de evidencias
+                "$PROJECT_URL/storage/v1/object/public/evidencias/$nombreArchivo"
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 
     private fun peticionHttp(
         urlCompleta: String,
@@ -247,7 +284,6 @@ object SupabaseService {
 
             if (userId.isBlank()) userId = UUID.randomUUID().toString()
 
-            // Descripción limpia sin repetir paréntesis innecesarios
             val descripcionGenerada = if (rol == "trabajador") {
                 val detalleEsp = if (especialidad.isNotBlank()) " Especialidad: ${especialidad.trim()}." else ""
                 "Especialista verificado en $oficio.$detalleEsp Atención $modalidad en $zona."
@@ -356,7 +392,8 @@ object SupabaseService {
                         trabajadorId = o.optString("trabajador_id"),
                         titulo = o.optString("titulo"),
                         ubicacion = o.optString("ubicacion", "Pénjamo, Gto."),
-                        fechaPublicacion = o.optString("fecha_publicacion", "Reciente")
+                        fechaPublicacion = o.optString("fecha_publicacion", "Reciente"),
+                        fotoUrl = o.optString("foto_url", null)
                     )
                 }
             }
@@ -364,7 +401,7 @@ object SupabaseService {
         emptyList()
     }
 
-    suspend fun publicarEvidencia(trabajadorId: String, titulo: String, ubicacion: String): Boolean =
+    suspend fun publicarEvidencia(trabajadorId: String, titulo: String, ubicacion: String, fotoUrl: String? = null): Boolean =
         withContext(Dispatchers.IO) {
             try {
                 val payload = JSONObject().apply {
@@ -372,6 +409,7 @@ object SupabaseService {
                     put("titulo", titulo.trim())
                     put("ubicacion", ubicacion.ifBlank { "Pénjamo, Gto." })
                     put("fecha_publicacion", "Verificado • $ubicacion")
+                    if (fotoUrl != null) put("foto_url", fotoUrl)
                 }
                 peticionHttp("$REST_URL/evidencias", "POST", payload.toString()).first in 200..299
             } catch (_: Exception) {
@@ -552,6 +590,7 @@ enum class RutaHabilio {
 
 @Composable
 fun HabilioApp() {
+    val contexto = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var pantallaActual by remember { mutableStateOf(RutaHabilio.INICIO_ROL) }
 
@@ -752,10 +791,19 @@ fun HabilioApp() {
                     trabajador = usuarioActual,
                     evidencias = todasLasEvidencias.filter { it.trabajadorId == usuarioActual?.id },
                     solicitudes = solicitudesUsuario,
-                    alPublicarEvidencia = { titulo ->
+                    alPublicarEvidencia = { titulo, imagenUri ->
                         val t = usuarioActual ?: return@PantallaTallerTrabajador
                         scope.launch {
-                            SupabaseService.publicarEvidencia(t.id, titulo, t.zona)
+                            var urlFotoPublica: String? = null
+                            if (imagenUri != null) {
+                                urlFotoPublica = SupabaseService.subirFotoStorage(contexto, imagenUri)
+                            }
+                            SupabaseService.publicarEvidencia(
+                                trabajadorId = t.id,
+                                titulo = titulo,
+                                ubicacion = t.zona,
+                                fotoUrl = urlFotoPublica
+                            )
                             recargarDatosGlobales()
                         }
                     },
@@ -847,9 +895,6 @@ fun coloresInputHabilio() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = HabilioTheme.TextoPrimario
 )
 
-/**
- * Contenedor estándar de tarjeta para evitar repetir Surface + BorderStroke + Column en cada vista.
- */
 @Composable
 fun HabilioTarjeta(
     modifier: Modifier = Modifier,
@@ -885,10 +930,6 @@ fun HabilioTarjeta(
     }
 }
 
-/**
- * Barra superior corregida: El badge "Modo Trabajador" va junto al título corto "Habilio",
- * evitando aplastar o estirar verticalmente la barra cuando la ubicación es muy larga.
- */
 @Composable
 fun HabilioTopBar(
     subtituloUbicacion: String? = "Pénjamo, Gto.",
@@ -984,9 +1025,6 @@ fun HabilioTopBar(
     }
 }
 
-/**
- * Insignia protegida con softWrap = false para que jamás se deforme verticalmente.
- */
 @Composable
 fun HabilioBadge(
     texto: String,
@@ -1012,9 +1050,6 @@ fun HabilioBadge(
     }
 }
 
-/**
- * Avatar reutilizable para tarjetas de usuario y especialistas.
- */
 @Composable
 fun AvatarUsuario(
     tamano: Dp = 54.dp,
@@ -1052,9 +1087,6 @@ fun AvatarUsuario(
     }
 }
 
-/**
- * Componente unificado para estados de carga o listas vacías.
- */
 @Composable
 fun EstadoCargaOVacio(
     cargando: Boolean,
@@ -1108,9 +1140,6 @@ fun EstadoCargaOVacio(
     }
 }
 
-/**
- * Barra de navegación inferior unificada para Cliente y Trabajador.
- */
 @Composable
 fun HabilioBarraInferior(
     primerTabSeleccionado: Boolean,
@@ -2963,16 +2992,13 @@ private fun TarjetaEspecialistaBuscador(
     }
 }
 
-/**
- * Genera una descripción clara sin repetir el texto crudo entre paréntesis.
- */
 private fun construirResumenLimpio(esp: PerfilUsuario): String {
     val tallerTexto = if (esp.nombreTaller.isNotBlank()) " (${esp.nombreTaller})" else ""
     return "Maestro especialista en ${esp.oficio}$tallerTexto con servicio garantizado en ${esp.zona}."
 }
 
 // ============================================================================
-// 11. PANTALLA 7: DETALLE DE ESPECIALISTA (Corregido texto completo sin truncar)
+// 11. PANTALLA 7: DETALLE DE ESPECIALISTA
 // ============================================================================
 @Composable
 fun PantallaDetalleEspecialista(
@@ -3079,8 +3105,6 @@ fun PantallaDetalleEspecialista(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // RESUMEN DE EXPERIENCIA PRÁCTICA CORREGIDO:
-            // Muestra el resumen general y debajo una tarjeta completa sin recortar la especialidad.
             HabilioTarjeta(
                 colorFondo = HabilioTheme.FondoAzulSuave.copy(alpha = 0.6f),
                 colorBorde = HabilioTheme.AzulVerificado.copy(alpha = 0.3f)
@@ -3137,7 +3161,6 @@ fun PantallaDetalleEspecialista(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Botón con heightIn(min = 48.dp) para que nombres largos nunca se corten verticalmente
             OutlinedButton(
                 onClick = alAbrirModalCalificar,
                 modifier = Modifier
@@ -3253,9 +3276,6 @@ private fun CajaMetricaDetalle(
     }
 }
 
-/**
- * Etiqueta adaptable que permite múltiples líneas para no cortar el texto con "...".
- */
 @Composable
 private fun EtiquetaCompleta(texto: String, modifier: Modifier = Modifier) {
     Surface(
@@ -3864,12 +3884,20 @@ fun PantallaTallerTrabajador(
     trabajador: PerfilUsuario?,
     evidencias: List<EvidenciaItem>,
     solicitudes: List<SolicitudItem>,
-    alPublicarEvidencia: (String) -> Unit,
+    alPublicarEvidencia: (String, Uri?) -> Unit,
     alIrASolicitudes: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
     var tituloNuevaEvidencia by remember { mutableStateOf("") }
+    var imagenSeleccionada by remember { mutableStateOf<Uri?>(null) }
+
     val ultimoPagoLiberado = solicitudes.firstOrNull { it.estado == "completado" }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        imagenSeleccionada = uri
+    }
 
     Scaffold(
         topBar = {
@@ -4003,14 +4031,46 @@ fun PantallaTallerTrabajador(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                if (imagenSeleccionada != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(HabilioTheme.SuperficieElevada)
+                            .clickable { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.CheckCircle, tint = HabilioTheme.VerdeExito, contentDescription = null, modifier = Modifier.size(28.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Fotografía lista (Toca para cambiar)", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                        }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario)
+                    ) {
+                        Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Elegir fotografía", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Button(
                     onClick = {
-                        if (tituloNuevaEvidencia.isNotBlank()) {
-                            alPublicarEvidencia(tituloNuevaEvidencia)
+                        if (tituloNuevaEvidencia.isNotBlank() && imagenSeleccionada != null) {
+                            alPublicarEvidencia(tituloNuevaEvidencia, imagenSeleccionada)
                             tituloNuevaEvidencia = ""
+                            imagenSeleccionada = null
                         }
                     },
-                    enabled = tituloNuevaEvidencia.isNotBlank(),
+                    enabled = tituloNuevaEvidencia.isNotBlank() && imagenSeleccionada != null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
@@ -4020,9 +4080,9 @@ fun PantallaTallerTrabajador(
                         contentColor = HabilioTheme.TextoSobreAmarillo
                     )
                 ) {
-                    Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Cargar Fotografía al Portafolio", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text("Subir Evidencia", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
             }
 
@@ -4052,14 +4112,27 @@ fun PantallaTallerTrabajador(
                             modifier = Modifier.weight(1f)
                         ) {
                             Column {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(100.dp)
-                                        .background(HabilioTheme.SuperficieElevada),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Outlined.Image, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(32.dp))
+                                if (!ev.fotoUrl.isNullOrBlank()) {
+                                    coil.compose.AsyncImage(
+                                        model = ev.fotoUrl,
+                                        contentDescription = ev.titulo,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(100.dp)
+                                            .background(HabilioTheme.SuperficieElevada)
+                                    )
+                                } else {
+                                    // Si no tiene foto (registros antiguos), muestra el icono por defecto
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(100.dp)
+                                            .background(HabilioTheme.SuperficieElevada),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Outlined.Image, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(32.dp))
+                                    }
                                 }
                                 Column(modifier = Modifier.padding(10.dp)) {
                                     Text(

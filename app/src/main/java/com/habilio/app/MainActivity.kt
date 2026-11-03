@@ -260,7 +260,8 @@ object SupabaseService {
         nombreTaller: String = "",
         oficio: String = "",
         especialidad: String = "",
-        modalidad: String = ""
+        modalidad: String = "",
+        fotoUrl: String? = null // <-- NUEVO PARÁMETRO
     ): Result<PerfilUsuario> = withContext(Dispatchers.IO) {
         try {
             val correoFinal = normalizarCorreo(correoInput.ifBlank { telefono }, telefono)
@@ -276,7 +277,6 @@ object SupabaseService {
                 userId = jsonAuth.optJSONObject("user")?.optString("id").orEmpty()
                     .ifBlank { jsonAuth.optString("id", "") }
             } else {
-                // Si el correo ya estaba registrado en Auth, verificamos con su contraseña exacta
                 val (loginCode, loginResp) = peticionHttp(
                     "$AUTH_URL/token?grant_type=password",
                     "POST",
@@ -309,6 +309,7 @@ object SupabaseService {
                 put("correo", correoFinal)
                 put("zona", zona.trim().ifBlank { "Pénjamo, Gto." })
                 put("direccion", direccion.trim().ifBlank { "Zona Centro, Pénjamo, Gto." })
+                if (!fotoUrl.isNullOrBlank()) put("foto_url", fotoUrl) // <-- SE AGREGA LA URL AL JSON
                 if (rol == "trabajador") {
                     put("nombre_taller", nombreTaller.trim())
                     put("oficio", oficio)
@@ -1232,23 +1233,36 @@ fun AvatarUsuario(
     mostrarPuntoDisponible: Boolean = false,
     icono: ImageVector = Icons.Default.Person,
     colorIcono: Color = HabilioTheme.TextoSecundario,
-    colorFondo: Color = HabilioTheme.SuperficieElevada
+    colorFondo: Color = HabilioTheme.SuperficieElevada,
+    fotoUrl: String? = null // <-- NUEVO PARÁMETRO
 ) {
     val shape = if (esCircular) CircleShape else RoundedCornerShape(12.dp)
     Box(contentAlignment = Alignment.BottomEnd) {
-        Box(
-            modifier = Modifier
-                .size(tamano)
-                .clip(shape)
-                .background(colorFondo),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icono,
-                contentDescription = null,
-                tint = colorIcono,
-                modifier = Modifier.size(tamano * 0.6f)
+        if (!fotoUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = fotoUrl,
+                contentDescription = "Avatar",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(tamano)
+                    .clip(shape)
+                    .background(colorFondo)
             )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(tamano)
+                    .clip(shape)
+                    .background(colorFondo),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icono,
+                    contentDescription = null,
+                    tint = colorIcono,
+                    modifier = Modifier.size(tamano * 0.6f)
+                )
+            }
         }
         if (mostrarPuntoDisponible) {
             Box(
@@ -2434,6 +2448,7 @@ fun PantallaRegistroCliente(
     alCambiarATrabajador: () -> Unit,
     alVolverInicio: () -> Unit
 ) {
+    val contexto = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var nombre by remember { mutableStateOf("") }
     var telefono by remember { mutableStateOf("") }
@@ -2441,6 +2456,12 @@ fun PantallaRegistroCliente(
     var contrasena by remember { mutableStateOf("") }
     var cargando by remember { mutableStateOf(false) }
     var mensajeError by remember { mutableStateOf<String?>(null) }
+
+    // Estado para la imagen seleccionada
+    var imagenSeleccionada by remember { mutableStateOf<Uri?>(null) }
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri -> imagenSeleccionada = uri }
 
     Column(
         modifier = Modifier
@@ -2464,7 +2485,66 @@ fun PantallaRegistroCliente(
             alSeleccionarRegistro = {}
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+
+        HabilioTarjeta(paddingInterno = 18.dp) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    contentAlignment = Alignment.BottomEnd,
+                    modifier = Modifier.clickable {
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) {
+                    if (imagenSeleccionada != null) {
+                        AsyncImage(
+                            model = imagenSeleccionada,
+                            contentDescription = "Foto de perfil",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(HabilioTheme.SuperficieElevada)
+                        )
+                    } else {
+                        AvatarUsuario(
+                            tamano = 72.dp,
+                            esCircular = true,
+                            icono = Icons.Default.Person,
+                            colorIcono = HabilioTheme.AmarilloPrimario
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(HabilioTheme.AmarilloPrimario)
+                            .border(2.dp, HabilioTheme.SuperficieTarjeta, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = "Subir foto",
+                            tint = HabilioTheme.TextoSobreAmarillo,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Foto de Perfil", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Sube una imagen para que los especialistas puedan reconocerte al llegar a tu domicilio.",
+                    fontSize = 13.sp,
+                    color = HabilioTheme.TextoSecundario,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
 
         HabilioTarjeta(paddingInterno = 18.dp) {
             HabilioCampoTexto(
@@ -2525,12 +2605,19 @@ fun PantallaRegistroCliente(
                     cargando = true
                     mensajeError = null
                     scope.launch {
+                        // Subir foto primero si hay una seleccionada
+                        var urlFotoPublica: String? = null
+                        if (imagenSeleccionada != null) {
+                            urlFotoPublica = SupabaseService.subirFotoStorage(contexto, imagenSeleccionada!!)
+                        }
+
                         val res = SupabaseService.registrarUsuario(
                             rol = "cliente",
                             nombre = nombre,
                             telefono = telefono,
                             correoInput = correo,
-                            contrasena = contrasena
+                            contrasena = contrasena,
+                            fotoUrl = urlFotoPublica
                         )
                         cargando = false
                         res.onSuccess(alRegistroExitoso).onFailure {
@@ -2547,7 +2634,6 @@ fun PantallaRegistroCliente(
         TarjetaCambioATrabajador(alClick = alCambiarATrabajador)
     }
 }
-
 // ============================================================================
 // 9. PANTALLA 5: REGISTRO TRABAJADOR
 // ============================================================================
@@ -2558,6 +2644,7 @@ fun PantallaRegistroTrabajador(
     alCambiarACliente: () -> Unit,
     alVolverInicio: () -> Unit
 ) {
+    val contexto = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var nombre by remember { mutableStateOf("") }
     var nombreTaller by remember { mutableStateOf("") }
@@ -2571,6 +2658,12 @@ fun PantallaRegistroTrabajador(
     var direccionTaller by remember { mutableStateOf("") }
     var cargando by remember { mutableStateOf(false) }
     var mensajeError by remember { mutableStateOf<String?>(null) }
+
+    // Estado para la imagen seleccionada
+    var imagenSeleccionada by remember { mutableStateOf<Uri?>(null) }
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri -> imagenSeleccionada = uri }
 
     val oficios = listOf(
         Triple("Albañilería", "Obra y acabados", Icons.Default.Construction),
@@ -2616,25 +2709,43 @@ fun PantallaRegistroTrabajador(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(contentAlignment = Alignment.BottomEnd) {
-                    AvatarUsuario(
-                        tamano = 72.dp,
-                        esCircular = true,
-                        icono = Icons.Default.Handyman,
-                        colorIcono = HabilioTheme.AmarilloPrimario
-                    )
+                Box(
+                    contentAlignment = Alignment.BottomEnd,
+                    modifier = Modifier.clickable {
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) {
+                    if (imagenSeleccionada != null) {
+                        AsyncImage(
+                            model = imagenSeleccionada,
+                            contentDescription = "Foto de perfil",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(HabilioTheme.SuperficieElevada)
+                        )
+                    } else {
+                        AvatarUsuario(
+                            tamano = 72.dp,
+                            esCircular = true,
+                            icono = Icons.Default.Handyman,
+                            colorIcono = HabilioTheme.AmarilloPrimario
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(26.dp)
                             .clip(CircleShape)
-                            .background(HabilioTheme.AmarilloPrimario),
+                            .background(HabilioTheme.AmarilloPrimario)
+                            .border(2.dp, HabilioTheme.SuperficieTarjeta, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.PhotoCamera,
                             contentDescription = "Subir foto",
                             tint = HabilioTheme.TextoSobreAmarillo,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -2642,7 +2753,7 @@ fun PantallaRegistroTrabajador(
                 Text("Foto de Perfil Profesional", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Sube una imagen clara de tu rostro, uniforme o taller. Un perfil con foto recibe 4x más solicitudes directas.",
+                    text = "Sube una imagen clara de tu rostro o taller. Un perfil con foto recibe más solicitudes directas.",
                     fontSize = 13.sp,
                     color = HabilioTheme.TextoSecundario,
                     textAlign = TextAlign.Center
@@ -2837,6 +2948,12 @@ fun PantallaRegistroTrabajador(
                 cargando = true
                 mensajeError = null
                 scope.launch {
+                    // Subir foto primero si hay una seleccionada
+                    var urlFotoPublica: String? = null
+                    if (imagenSeleccionada != null) {
+                        urlFotoPublica = SupabaseService.subirFotoStorage(contexto, imagenSeleccionada!!)
+                    }
+
                     val res = SupabaseService.registrarUsuario(
                         rol = "trabajador",
                         nombre = nombre,
@@ -2848,7 +2965,8 @@ fun PantallaRegistroTrabajador(
                         nombreTaller = nombreTaller,
                         oficio = oficioSeleccionado,
                         especialidad = especialidad,
-                        modalidad = modalidades[modalidadSeleccionada].first
+                        modalidad = modalidades[modalidadSeleccionada].first,
+                        fotoUrl = urlFotoPublica
                     )
                     cargando = false
                     res.onSuccess(alRegistroExitoso).onFailure {
@@ -3044,7 +3162,7 @@ private fun TarjetaEspecialistaBuscador(
 ) {
     HabilioTarjeta {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            AvatarUsuario(mostrarPuntoDisponible = true)
+            AvatarUsuario(mostrarPuntoDisponible = true, fotoUrl = especialista.fotoUrl)
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
@@ -3247,7 +3365,7 @@ fun PantallaDetalleEspecialista(
 
             HabilioTarjeta {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    AvatarUsuario(tamano = 64.dp)
+                    AvatarUsuario(tamano = 64.dp, fotoUrl = especialista.fotoUrl)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("● Disponible hoy", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.VerdeExito)
@@ -3346,7 +3464,7 @@ fun PantallaDetalleEspecialista(
             Spacer(modifier = Modifier.height(16.dp))
 
             BotonPrimarioHabilio(
-                texto = "Solicitar Servicio ($450 - $1,200 MXN)",
+                texto = "Solicitar Servicio",
                 alClick = alAbrirModalSolicitar
             )
 
@@ -3372,13 +3490,13 @@ fun PantallaDetalleEspecialista(
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            Text("Portafolio de Trabajos Reales (${evidencias.size})", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Portafolio de trabajos reales (${evidencias.size})", fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
 
             EstadoCargaOVacio(
                 cargando = false,
                 estaVacio = evidencias.isEmpty(),
-                mensajeVacio = "Este especialista aún no ha subido fotografías a su portafolio."
+                mensajeVacio = "Este trabajador aún no ha subido fotografías a su portafolio."
             )
 
             evidencias.forEach { ev ->
@@ -3584,7 +3702,7 @@ fun PantallaPerfilCliente(
             HabilioTarjeta {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(contentAlignment = Alignment.BottomEnd) {
-                        AvatarUsuario(tamano = 64.dp, esCircular = true, colorIcono = HabilioTheme.TextoPrimario)
+                        AvatarUsuario(tamano = 64.dp, esCircular = true, colorIcono = HabilioTheme.TextoPrimario, fotoUrl = cliente?.fotoUrl)
                         Box(
                             modifier = Modifier
                                 .size(22.dp)
@@ -4189,16 +4307,12 @@ fun PantallaTallerTrabajador(
 
             HabilioTarjeta {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(HabilioTheme.SuperficieElevada)
-                            .border(2.dp, HabilioTheme.AmarilloPrimario, RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Person, contentDescription = null, tint = HabilioTheme.TextoPrimario, modifier = Modifier.size(34.dp))
-                    }
+                    AvatarUsuario(
+                        tamano = 56.dp,
+                        icono = Icons.Default.Person,
+                        colorIcono = HabilioTheme.TextoPrimario,
+                        fotoUrl = trabajador?.fotoUrl
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(trabajador?.nombre ?: "Especialista Habilio", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)

@@ -107,6 +107,10 @@ object HabilioTheme {
     val TextoPlaceholder = Color(0xFF8A94A6)
 }
 
+object AppConfig {
+    var logoGlobal: Any = R.drawable.logo_habilio
+}
+
 // ============================================================================
 // 2. MODELOS DE DATOS Y CLIENTE REST DE SUPABASE
 // ============================================================================
@@ -1133,6 +1137,31 @@ fun HabilioApp() {
 // ============================================================================
 
 @Composable
+fun LogoGlobalHabilio(
+    modifier: Modifier = Modifier,
+    colorIcono: Color = HabilioTheme.AmarilloPrimario
+) {
+    when (val logo = AppConfig.logoGlobal) {
+        is ImageVector -> {
+            Icon(
+                imageVector = logo,
+                contentDescription = "Logo Habilio",
+                tint = colorIcono,
+                modifier = modifier
+            )
+        }
+        else -> {
+            AsyncImage(
+                model = logo,
+                contentDescription = "Logo Habilio",
+                contentScale = ContentScale.FillBounds,
+                modifier = modifier
+            )
+        }
+    }
+}
+
+@Composable
 fun coloresInputHabilio() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = HabilioTheme.SuperficieInput,
     unfocusedContainerColor = HabilioTheme.SuperficieInput,
@@ -1307,12 +1336,7 @@ fun HabilioTopBar(
                             .border(1.dp, HabilioTheme.BordeTarjeta, RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Handyman,
-                            contentDescription = "Logo de Habilio",
-                            tint = HabilioTheme.AmarilloPrimario,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        LogoGlobalHabilio(modifier = Modifier.fillMaxSize())
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -1611,12 +1635,7 @@ fun EncabezadoAutenticacion(
                 .border(1.dp, HabilioTheme.BordeTarjeta, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Handyman,
-                contentDescription = "Logo Habilio",
-                tint = HabilioTheme.AmarilloPrimario,
-                modifier = Modifier.size(36.dp)
-            )
+            LogoGlobalHabilio(modifier = Modifier.fillMaxSize())
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -2417,12 +2436,7 @@ fun PantallaInicioRol(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Handyman,
-                        contentDescription = null,
-                        tint = HabilioTheme.AmarilloPrimario,
-                        modifier = Modifier.size(44.dp)
-                    )
+                    LogoGlobalHabilio(modifier = Modifier.fillMaxSize())
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("Habilio", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                 }

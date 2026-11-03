@@ -756,7 +756,8 @@ enum class RutaHabilio {
     PERFIL_CLIENTE,
     SOLICITUDES_TRABAJADOR,
     TALLER_TRABAJADOR,
-    EDITAR_PERFIL
+    EDITAR_PERFIL,
+    SEGUIMIENTO_SOLICITUD
 }
 
 val OFICIOS_HABILIO = listOf(
@@ -784,6 +785,7 @@ fun HabilioApp() {
     var usuarioActual by remember { mutableStateOf<PerfilUsuario?>(null) }
     var listaTrabajadores by remember { mutableStateOf<List<PerfilUsuario>>(emptyList()) }
     var trabajadorSeleccionado by remember { mutableStateOf<PerfilUsuario?>(null) }
+    var solicitudEnSeguimiento by remember { mutableStateOf<SolicitudItem?>(null) }
     var todasLasEvidencias by remember { mutableStateOf<List<EvidenciaItem>>(emptyList()) }
     var todasLasResenas by remember { mutableStateOf<List<ResenaItem>>(emptyList()) }
     var solicitudesUsuario by remember { mutableStateOf<List<SolicitudItem>>(emptyList()) }
@@ -808,6 +810,9 @@ fun HabilioApp() {
                 trabajadorSeleccionado?.let { sel ->
                     trabajadorSeleccionado = listaTrabajadores.find { it.id == sel.id } ?: sel
                 }
+                solicitudEnSeguimiento?.let { seg ->
+                    solicitudEnSeguimiento = solicitudesUsuario.find { it.id == seg.id } ?: seg
+                }
             }
             cargandoDatos = false
         }
@@ -826,6 +831,7 @@ fun HabilioApp() {
             RutaHabilio.REGISTRO_CLIENTE -> pantallaActual = RutaHabilio.LOGIN_CLIENTE
             RutaHabilio.REGISTRO_TRABAJADOR -> pantallaActual = RutaHabilio.LOGIN_TRABAJADOR
             RutaHabilio.DETALLE_ESPECIALISTA, RutaHabilio.PERFIL_CLIENTE -> pantallaActual = RutaHabilio.BUSCADOR_CLIENTE
+            RutaHabilio.SEGUIMIENTO_SOLICITUD -> pantallaActual = RutaHabilio.PERFIL_CLIENTE
             RutaHabilio.TALLER_TRABAJADOR -> pantallaActual = RutaHabilio.SOLICITUDES_TRABAJADOR
             RutaHabilio.EDITAR_PERFIL -> {
                 pantallaActual = if (usuarioActual?.rol == "trabajador") {
@@ -963,11 +969,9 @@ fun HabilioApp() {
                     cliente = usuarioActual,
                     solicitudes = solicitudesUsuario,
                     alEditarPerfil = { pantallaActual = RutaHabilio.EDITAR_PERFIL },
-                    alVerDetalleTrabajador = { trabajadorId ->
-                        listaTrabajadores.find { it.id == trabajadorId }?.let {
-                            trabajadorSeleccionado = it
-                            pantallaActual = RutaHabilio.DETALLE_ESPECIALISTA
-                        }
+                    alVerSeguimientoSolicitud = { solicitud ->
+                        solicitudEnSeguimiento = solicitud
+                        pantallaActual = RutaHabilio.SEGUIMIENTO_SOLICITUD
                     },
                     alLiberarPago = { solicitudId ->
                         scope.launch {
@@ -984,6 +988,40 @@ fun HabilioApp() {
                     alIrAExplorar = { pantallaActual = RutaHabilio.BUSCADOR_CLIENTE },
                     alCambiarRol = { cerrarSesionYVolverInicio() }
                 )
+
+                RutaHabilio.SEGUIMIENTO_SOLICITUD -> {
+                    val solActual = solicitudesUsuario.find { it.id == solicitudEnSeguimiento?.id }
+                        ?: solicitudEnSeguimiento
+                    if (solActual != null) {
+                        val espAsociado = listaTrabajadores.find { it.id == solActual.trabajadorId }
+                        PantallaSeguimientoSolicitud(
+                            solicitud = solActual,
+                            especialista = espAsociado,
+                            alVolver = { pantallaActual = RutaHabilio.PERFIL_CLIENTE },
+                            alRefrescar = { recargarDatosGlobales() },
+                            alConfirmarCierre = {
+                                scope.launch {
+                                    SupabaseService.actualizarEstadoSolicitud(solActual.id, "completado")
+                                    recargarDatosGlobales()
+                                }
+                            },
+                            alCalificar = {
+                                if (espAsociado != null) {
+                                    trabajadorSeleccionado = espAsociado
+                                    mostrarModalCalificar = true
+                                }
+                            },
+                            alVerPerfilTrabajador = {
+                                if (espAsociado != null) {
+                                    trabajadorSeleccionado = espAsociado
+                                    pantallaActual = RutaHabilio.DETALLE_ESPECIALISTA
+                                }
+                            }
+                        )
+                    } else {
+                        pantallaActual = RutaHabilio.PERFIL_CLIENTE
+                    }
+                }
 
                 RutaHabilio.SOLICITUDES_TRABAJADOR -> PantallaSolicitudesTrabajador(
                     trabajador = usuarioActual,
@@ -1095,9 +1133,10 @@ fun HabilioApp() {
                 ModalSolicitudConfirmada(
                     solicitud = solicitudRecienConfirmada!!,
                     alAceptarYVerEstatus = {
+                        solicitudEnSeguimiento = solicitudRecienConfirmada
                         solicitudRecienConfirmada = null
                         recargarDatosGlobales()
-                        pantallaActual = RutaHabilio.PERFIL_CLIENTE
+                        pantallaActual = RutaHabilio.SEGUIMIENTO_SOLICITUD
                     },
                     alVolverAlInicio = {
                         solicitudRecienConfirmada = null
@@ -3176,11 +3215,18 @@ fun PantallaEditarPerfil(
         mutableStateOf(usuarioActual.oficio.ifBlank { "Albañilería" })
     }
     var especialidad by remember(usuarioActual) { mutableStateOf(usuarioActual.especialidad) }
-    var modalidadSeleccionada by remember(usuarioActual) {
-        val idx = MODALIDADES_HABILIO.indexOfFirst {
-            usuarioActual.modalidad.contains(it.first.takeLast(8), ignoreCase = true)
+    var modalidadSeleccionada by remember(usuarioActual.id, usuarioActual.modalidad) {
+        val modGuardada = usuarioActual.modalidad.trim()
+        val idx = when {
+            modGuardada.contains("Ambos", ignoreCase = true) -> 2
+            modGuardada.contains("Taller", ignoreCase = true) ||
+                    modGuardada.contains("Local", ignoreCase = true) -> 1
+            modGuardada.contains("Domicilio", ignoreCase = true) -> 0
+            else -> MODALIDADES_HABILIO.indexOfFirst {
+                it.first.equals(modGuardada, ignoreCase = true)
+            }.coerceAtLeast(0)
         }
-        mutableStateOf(if (idx >= 0) idx else 0)
+        mutableStateOf(idx)
     }
 
     var nuevaImagenUri by remember { mutableStateOf<Uri?>(null) }
@@ -4185,7 +4231,7 @@ fun PantallaPerfilCliente(
     cliente: PerfilUsuario?,
     solicitudes: List<SolicitudItem>,
     alEditarPerfil: () -> Unit,
-    alVerDetalleTrabajador: (String) -> Unit,
+    alVerSeguimientoSolicitud: (SolicitudItem) -> Unit,
     alLiberarPago: (String) -> Unit,
     alCalificarTrabajador: (String) -> Unit,
     alIrAExplorar: () -> Unit,
@@ -4405,7 +4451,7 @@ fun PantallaPerfilCliente(
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(
-                            onClick = { alVerDetalleTrabajador(sol.trabajadorId) },
+                            onClick = { alVerSeguimientoSolicitud(sol) },
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = 48.dp),
@@ -5062,6 +5108,322 @@ fun PantallaTallerTrabajador(
                     if (fila.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
             }
+        }
+    }
+}
+
+// ============================================================================
+// 16. PANTALLA: SEGUIMIENTO DE SOLICITUD (Estilo Rastreo de Pedido Amazon)
+// ============================================================================
+@Composable
+fun PantallaSeguimientoSolicitud(
+    solicitud: SolicitudItem,
+    especialista: PerfilUsuario?,
+    alVolver: () -> Unit,
+    alRefrescar: () -> Unit,
+    alConfirmarCierre: () -> Unit,
+    alCalificar: () -> Unit,
+    alVerPerfilTrabajador: () -> Unit
+) {
+    val folioCorto = remember(solicitud.id) {
+        val digitos = solicitud.id.filter { it.isDigit() }.take(4).padEnd(4, '8')
+        "#HAB-$digitos"
+    }
+
+    val esRechazado = solicitud.estado == "rechazado"
+    val pasoActual = when (solicitud.estado) {
+        "pendiente" -> 1
+        "en_ejecucion" -> 2
+        "completado" -> 3
+        else -> 0
+    }
+
+    Scaffold(
+        topBar = {
+            HabilioTopBar(
+                subtituloUbicacion = "Seguimiento de servicio",
+                alAccionDerecha = alRefrescar,
+                iconoDerecha = Icons.Default.Refresh
+            )
+        },
+        containerColor = HabilioTheme.FondoPrincipal
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = alVolver, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
+                        tint = HabilioTheme.TextoPrimario,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Volver a Mi Perfil", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
+                }
+
+                HabilioBadge(
+                    texto = "Folio $folioCorto",
+                    colorTexto = HabilioTheme.AmarilloPrimario,
+                    colorFondo = HabilioTheme.FondoAmarilloSuave
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Encabezado principal del estado actual
+            HabilioTarjeta(
+                colorBorde = when {
+                    esRechazado -> HabilioTheme.RojoUrgente
+                    pasoActual == 3 -> HabilioTheme.VerdeExito
+                    else -> HabilioTheme.AmarilloPrimario.copy(alpha = 0.6f)
+                },
+                grosorBorde = 1.5.dp
+            ) {
+                val tituloEstado = when {
+                    esRechazado -> "Solicitud rechazada por el especialista"
+                    pasoActual == 1 -> "Esperando confirmación del especialista"
+                    pasoActual == 2 -> "Trabajo en ejecución"
+                    else -> "¡Servicio concluido con éxito!"
+                }
+                val subtituloEstado = when {
+                    esRechazado -> "El trabajador no pudo atender esta solicitud en este momento. Puedes buscar otro especialista disponible."
+                    pasoActual == 1 -> "Tu solicitud ya fue enviada a ${solicitud.nombreTrabajador}. Te notificaremos en cuanto la acepte."
+                    pasoActual == 2 -> "${solicitud.nombreTrabajador} aceptó tu solicitud y el trabajo está en proceso."
+                    else -> "El servicio ha sido marcado como finalizado. Ya puedes dejar tu reseña y calificación."
+                }
+
+                Text(
+                    text = tituloEstado,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = when {
+                        esRechazado -> HabilioTheme.RojoUrgente
+                        pasoActual == 3 -> HabilioTheme.VerdeExito
+                        else -> HabilioTheme.AmarilloPrimario
+                    }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = subtituloEstado,
+                    fontSize = 13.sp,
+                    color = HabilioTheme.TextoSecundario,
+                    lineHeight = 19.sp
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                if (esRechazado) {
+                    PasoRastreoPedido(
+                        titulo = "Solicitud enviada",
+                        subtitulo = "Registrada con folio $folioCorto",
+                        completado = true,
+                        activo = false,
+                        mostrarLineaInferior = true
+                    )
+                    PasoRastreoPedido(
+                        titulo = "Solicitud rechazada",
+                        subtitulo = "El especialista no tenía disponibilidad para este trabajo",
+                        completado = false,
+                        activo = true,
+                        esError = true,
+                        mostrarLineaInferior = false
+                    )
+                } else {
+                    PasoRastreoPedido(
+                        titulo = "1. Solicitud enviada",
+                        subtitulo = "Enviada a ${solicitud.nombreTrabajador} con presupuesto propuesto",
+                        completado = pasoActual >= 1,
+                        activo = pasoActual == 1,
+                        mostrarLineaInferior = true
+                    )
+                    PasoRastreoPedido(
+                        titulo = "2. Solicitud aceptada y en ejecución",
+                        subtitulo = if (pasoActual >= 2) "El especialista confirmó y realiza el servicio" else "Pendiente de aceptación del especialista",
+                        completado = pasoActual >= 2,
+                        activo = pasoActual == 2,
+                        mostrarLineaInferior = true
+                    )
+                    PasoRastreoPedido(
+                        titulo = "3. Trabajo verificado y concluido",
+                        subtitulo = if (pasoActual >= 3) "Servicio finalizado satisfactoriamente" else "Se completará al terminar el trabajo",
+                        completado = pasoActual >= 3,
+                        activo = pasoActual == 3,
+                        mostrarLineaInferior = false
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Detalles del pedido / servicio
+            HabilioTarjeta {
+                Text(
+                    text = "📦 DETALLES DE LA SOLICITUD",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = HabilioTheme.AmarilloPrimario
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        AvatarUsuario(
+                            tamano = 48.dp,
+                            fotoUrl = especialista?.fotoUrl
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloPrimario)
+                            if (!especialista?.telefono.isNullOrBlank()) {
+                                Text("📱 +52 ${especialista?.telefono}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                            }
+                        }
+                    }
+
+                    TextButton(onClick = alVerPerfilTrabajador) {
+                        Text("Ver perfil >", color = HabilioTheme.AzulVerificado, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = HabilioTheme.BordeTarjeta)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text("Trabajo solicitado:", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(solicitud.descripcion, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Ubicación de atención:", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("📍 ${solicitud.ubicacion}", fontSize = 14.sp)
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = HabilioTheme.BordeTarjeta)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("PRESUPUESTO ACORDADO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
+                        Text("Acuerdo directo con el especialista", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    }
+                    Text(
+                        text = "$${String.format("%.2f", solicitud.monto)} MXN",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = HabilioTheme.AmarilloPrimario
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            if (!esRechazado && pasoActual < 3) {
+                Button(
+                    onClick = alConfirmarCierre,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = HabilioTheme.VerdeExito,
+                        contentColor = HabilioTheme.TextoSobreAmarillo
+                    )
+                ) {
+                    Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Confirmar que el Trabajo fue Concluido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                }
+            } else if (pasoActual == 3) {
+                BotonPrimarioHabilio(
+                    texto = "★ Calificar y Recomendar al Especialista",
+                    alClick = alCalificar
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PasoRastreoPedido(
+    titulo: String,
+    subtitulo: String,
+    completado: Boolean,
+    activo: Boolean,
+    esError: Boolean = false,
+    mostrarLineaInferior: Boolean
+) {
+    val colorCirculo = when {
+        esError -> HabilioTheme.RojoUrgente
+        completado -> HabilioTheme.VerdeExito
+        activo -> HabilioTheme.AmarilloPrimario
+        else -> HabilioTheme.BordeTarjeta
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(colorCirculo),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    esError -> Icon(Icons.Default.Close, contentDescription = null, tint = HabilioTheme.TextoPrimario, modifier = Modifier.size(16.dp))
+                    completado -> Icon(Icons.Default.Check, contentDescription = null, tint = HabilioTheme.TextoSobreAmarillo, modifier = Modifier.size(16.dp))
+                    else -> Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(HabilioTheme.FondoPrincipal))
+                }
+            }
+            if (mostrarLineaInferior) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(42.dp)
+                        .background(if (completado) HabilioTheme.VerdeExito else HabilioTheme.BordeTarjeta)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.padding(bottom = if (mostrarLineaInferior) 18.dp else 0.dp)) {
+            Text(
+                text = titulo,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = if (completado || activo) HabilioTheme.TextoPrimario else HabilioTheme.TextoSecundario
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitulo,
+                fontSize = 12.sp,
+                color = HabilioTheme.TextoSecundario,
+                lineHeight = 17.sp
+            )
         }
     }
 }

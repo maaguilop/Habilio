@@ -160,6 +160,7 @@ data class SolicitudItem(
     val monto: Double,
     val esUrgente: Boolean,
     val estado: String,
+    val fueEvaluada: Boolean = false,
     val nombreCliente: String = "Cliente Habilio",
     val nombreTrabajador: String = "Especialista Habilio",
     val oficioTrabajador: String = "Oficio Verificado"
@@ -177,6 +178,17 @@ object SupabaseService {
     fun cerrarSesionToken() {
         tokenSesionActual = null
     }
+
+    suspend fun marcarSolicitudEvaluada(solicitudId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply { put("fue_evaluada", true) }
+                peticionHttp("$REST_URL/solicitudes?id=eq.$solicitudId", "PATCH", payload.toString()).first in 200..299
+            } catch (_: Exception) {
+                false
+            }
+        }
+
 
     /**
      * Comprime y redimensiona la imagen seleccionada a un máximo de 1280px y calidad JPEG 75% (S-05).
@@ -721,6 +733,7 @@ object SupabaseService {
                             monto = o.optDouble("monto", 0.0),
                             esUrgente = o.optBoolean("es_urgente", false),
                             estado = o.optString("estado", "pendiente"),
+                            fueEvaluada = o.optBoolean("fue_evaluada", false),
                             nombreCliente = mapaNombres[cId]?.first ?: "Cliente Local",
                             nombreTrabajador = mapaNombres[tId]?.first ?: "Especialista",
                             oficioTrabajador = mapaNombres[tId]?.second ?: o.optString("oficio_etiqueta")
@@ -795,6 +808,8 @@ fun HabilioApp() {
     var solicitudRecienConfirmada by remember { mutableStateOf<SolicitudItem?>(null) }
     var mostrarModalCalificar by remember { mutableStateOf(false) }
     var evidenciaEnPantallaCompleta by remember { mutableStateOf<EvidenciaItem?>(null) }
+
+    var solicitudAEvaluar by remember { mutableStateOf<SolicitudItem?>(null) }
 
     fun recargarDatosGlobales() {
         scope.launch {
@@ -942,15 +957,24 @@ fun HabilioApp() {
                         val serviciosConEsteTrabajador = solicitudesUsuario.count {
                             it.trabajadorId == esp.id && it.estado == "completado"
                         }
+                        val serviciosSinEvaluar = solicitudesUsuario.count {
+                            it.trabajadorId == esp.id && it.estado == "completado" && !it.fueEvaluada
+                        }
+
                         PantallaDetalleEspecialista(
                             especialista = esp,
                             evidencias = todasLasEvidencias.filter { it.trabajadorId == esp.id },
                             resenas = todasLasResenas.filter { it.trabajadorId == esp.id },
                             totalServicios = serviciosConEsteTrabajador,
-                            puedeCalificar = serviciosConEsteTrabajador > 0, // H-06: Solo si concluyó un servicio
+                            puedeCalificar = serviciosSinEvaluar > 0,
                             alVolverAlListado = { pantallaActual = RutaHabilio.BUSCADOR_CLIENTE },
                             alAbrirModalSolicitar = { mostrarModalCompra = true },
-                            alAbrirModalCalificar = { mostrarModalCalificar = true },
+                            alAbrirModalCalificar = {
+                                solicitudAEvaluar = solicitudesUsuario.firstOrNull {
+                                    it.trabajadorId == esp.id && it.estado == "completado" && !it.fueEvaluada
+                                }
+                                mostrarModalCalificar = true
+                            },
                             alClickFotoEvidencia = { ev ->
                                 if (!ev.fotoUrl.isNullOrBlank()) evidenciaEnPantallaCompleta = ev
                             },
@@ -979,9 +1003,10 @@ fun HabilioApp() {
                             recargarDatosGlobales()
                         }
                     },
-                    alCalificarTrabajador = { trabajadorId ->
-                        listaTrabajadores.find { it.id == trabajadorId }?.let {
+                    alCalificarTrabajador = { solicitud ->
+                        listaTrabajadores.find { it.id == solicitud.trabajadorId }?.let {
                             trabajadorSeleccionado = it
+                            solicitudAEvaluar = solicitud
                             mostrarModalCalificar = true
                         }
                     },
@@ -1154,7 +1179,24 @@ fun HabilioApp() {
                         val trab = trabajadorSeleccionado ?: return@ModalEvaluarServicio
                         scope.launch {
                             SupabaseService.publicarResena(trab.id, autor, comentario, estrellas)
+
+                            // Marcar el pedido específico como evaluado
+                            solicitudAEvaluar?.let { sol ->
+                                SupabaseService.marcarSolicitudEvaluada(sol.id)
+
+                                // 1. ACTUALIZACIÓN OPTIMISTA (Desactiva el botón al instante)
+                                solicitudesUsuario = solicitudesUsuario.map {
+                                    if (it.id == sol.id) it.copy(fueEvaluada = true) else it
+                                }
+                                if (solicitudEnSeguimiento?.id == sol.id) {
+                                    solicitudEnSeguimiento = solicitudEnSeguimiento?.copy(fueEvaluada = true)
+                                }
+                            }
+
                             mostrarModalCalificar = false
+                            solicitudAEvaluar = null // Limpiar estado
+
+                            // 2. Refrescar datos globales en segundo plano
                             recargarDatosGlobales()
                         }
                     }
@@ -4233,7 +4275,7 @@ fun PantallaPerfilCliente(
     alEditarPerfil: () -> Unit,
     alVerSeguimientoSolicitud: (SolicitudItem) -> Unit,
     alLiberarPago: (String) -> Unit,
-    alCalificarTrabajador: (String) -> Unit,
+    alCalificarTrabajador: (SolicitudItem) -> Unit, // ACTUALIZADO PARA RECIBIR SOLICITUD COMPLETA
     alIrAExplorar: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
@@ -4480,15 +4522,29 @@ fun PantallaPerfilCliente(
                                 Text("Confirmar Cierre", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         } else if (completado) {
+                            val estaEvaluada = sol.fueEvaluada
+
                             OutlinedButton(
-                                onClick = { alCalificarTrabajador(sol.trabajadorId) },
+                                onClick = { alCalificarTrabajador(sol) },
+                                enabled = !estaEvaluada,
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 48.dp),
                                 shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario)
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (estaEvaluada) HabilioTheme.BordeTarjeta else HabilioTheme.AmarilloPrimario
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    disabledContentColor = HabilioTheme.TextoSecundario
+                                )
                             ) {
-                                Text("★ Evaluar", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = if (estaEvaluada) "★ Evaluado" else "★ Evaluar",
+                                    color = if (estaEvaluada) HabilioTheme.TextoSecundario else HabilioTheme.AmarilloPrimario,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
                             }
                         }
                     }
@@ -5339,6 +5395,24 @@ fun PantallaSeguimientoSolicitud(
             Spacer(modifier = Modifier.height(20.dp))
 
             if (!esRechazado && pasoActual < 3) {
+                // Nuevo botón de "Cancelar pedido" en color rojo
+                Button(
+                    onClick = { /* TODO: Agrega aquí el callback para cancelar (ej. alCancelarPedido()) */ },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = HabilioTheme.RojoUrgente,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Cancelar pedido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                }
+            } else if (pasoActual == 3) {
+                // Nuevo botón verde para confirmar que el servicio fue completado
                 Button(
                     onClick = alConfirmarCierre,
                     modifier = Modifier
@@ -5347,18 +5421,13 @@ fun PantallaSeguimientoSolicitud(
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = HabilioTheme.VerdeExito,
-                        contentColor = HabilioTheme.TextoSobreAmarillo
+                        contentColor = Color.White
                     )
                 ) {
                     Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Confirmar que el Trabajo fue Concluido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text("Confirmar que el servicio fue completado", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
-            } else if (pasoActual == 3) {
-                BotonPrimarioHabilio(
-                    texto = "★ Calificar y Recomendar al Especialista",
-                    alClick = alCalificar
-                )
             }
         }
     }

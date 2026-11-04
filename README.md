@@ -19,11 +19,11 @@ Abre Habilio e inicia sesión con alguna cuenta de prueba.
 
 Credenciales de prueba
 Son cuentas de demostración con datos ficticios.
-#	Rol	        Correo	                  Contraseña
-1	Trabajador	pedroplomero@habilio.com	habilio123
-2	Trabajador	robmdz@habilio.com	      habilio123
-3	Cliente	    camhrdz@habilio.com	        654321
-4	Cliente	    jperez@habilio.com	        123456
+	Rol	        Correo	                  Contraseña
+	Trabajador	pedroplomero@habilio.com	habilio123
+	Trabajador	robmdz@habilio.com	      habilio123
+	Cliente	    camhrdz@habilio.com	        654321
+	Cliente	    jperez@habilio.com	        123456
 
 Funcionalidades
 Cliente

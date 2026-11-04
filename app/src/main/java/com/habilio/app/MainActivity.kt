@@ -4175,35 +4175,7 @@ fun PantallaDetalleEspecialista(
             Spacer(modifier = Modifier.height(10.dp))
 
             // H-06 / RF-04: Solo permitir calificar cuando exista un servicio completado con este trabajador
-            if (puedeCalificar) {
-                OutlinedButton(
-                    onClick = alAbrirModalCalificar,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario.copy(alpha = 0.5f))
-                ) {
-                    Text(
-                        text = "★ Calificar y Recomendar a ${especialista.nombre}",
-                        color = HabilioTheme.AmarilloPrimario,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else {
-                Text(
-                    text = "ℹ️ Podrás calificar a ${especialista.nombre} una vez que concluya un servicio solicitado por ti.",
-                    fontSize = 12.sp,
-                    color = HabilioTheme.TextoSecundario,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                )
-            }
+
 
             Spacer(modifier = Modifier.height(22.dp))
 

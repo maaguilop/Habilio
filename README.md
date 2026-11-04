@@ -8,7 +8,7 @@ La aplicación está programada completamente con Kotlin y Jetpack Compose.<br>
 <h2>Requisitos</h2>
 Teléfono Android.<br>
 Conexión a internet (la app usa un servidor en la nube).<br>
-<h2>Pasos</h2><br>
+<h2>Pasos</h2>
 Desde el teléfono, abre la sección Releases del repositorio.<br>
 Descarga el archivo habilio.apk (en Assets).<br>
 Ábrelo desde la notificación de descarga o desde la app Archivos.<br>

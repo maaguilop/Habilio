@@ -2772,12 +2772,10 @@ fun PantallaLoginUnificada(
                 valor = telefonoOCorreo,
                 alCambiarValor = { telefonoOCorreo = it },
                 placeholder = "469 123 4567 o tu@correo.com",
-                prefijoTexto = "+52"
+                iconoInicial=Icons.Outlined.Person
             )
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // H-11: Se eliminó el botón muerto "¿La olvidaste?"
             HabilioCampoTexto(
                 etiqueta = "Contraseña",
                 valor = contrasena,
@@ -2970,7 +2968,7 @@ fun PantallaRegistroCliente(
                 valor = telefono,
                 alCambiarValor = { telefono = it },
                 placeholder = "469 123 4567",
-                prefijoTexto = "+52"
+                iconoInicial=Icons.Outlined.Phone
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -3142,7 +3140,7 @@ fun PantallaRegistroTrabajador(
             valor = telefono,
             alCambiarValor = { telefono = it },
             placeholder = "469 123 4567",
-            prefijoTexto = "+52"
+            iconoInicial = Icons.Outlined.Phone
         )
         Spacer(modifier = Modifier.height(12.dp))
 

@@ -172,6 +172,9 @@ object SupabaseService {
     private const val AUTH_URL = "$PROJECT_URL/auth/v1"
     private const val ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1cWl1emRrb2Jib210b29uYWNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1ODQ0NDEsImV4cCI6MjEwOTE2MDQ0MX0.0hCBoRTfYOYJmtUX6mgmGXm0eQTf1pbfk6anIGUONPg"
 
+    private const val PREFIJO_CANCELADA = "[CANCELADA] "
+    private const val PREFIJO_ESPERANDO = "[POR_CONFIRMAR] "
+
     // Token de sesión activo para respaldar políticas de seguridad (S-01)
     private var tokenSesionActual: String? = null
 
@@ -188,7 +191,6 @@ object SupabaseService {
                 false
             }
         }
-
 
     /**
      * Comprime y redimensiona la imagen seleccionada a un máximo de 1280px y calidad JPEG 75% (S-05).
@@ -723,16 +725,32 @@ object SupabaseService {
                         val o = arr.getJSONObject(i)
                         val cId = o.optString("cliente_id")
                         val tId = o.optString("trabajador_id")
+                        val estadoCrudo = o.optString("estado", "pendiente")
+                        val descCruda = o.optString("descripcion", "")
+
+                        // Decodificación compatible si la base de datos tiene CHECK constraint de 4 estados
+                        val (estadoReal, descLimpia) = when {
+                            descCruda.startsWith(PREFIJO_CANCELADA) -> {
+                                "cancelada" to descCruda.removePrefix(PREFIJO_CANCELADA)
+                            }
+                            descCruda.startsWith(PREFIJO_ESPERANDO) && estadoCrudo == "en_ejecucion" -> {
+                                "esperando_confirmacion" to descCruda.removePrefix(PREFIJO_ESPERANDO)
+                            }
+                            else -> {
+                                estadoCrudo to descCruda.removePrefix(PREFIJO_ESPERANDO).removePrefix(PREFIJO_CANCELADA)
+                            }
+                        }
+
                         SolicitudItem(
                             id = o.optString("id"),
                             clienteId = cId,
                             trabajadorId = tId,
                             oficioEtiqueta = o.optString("oficio_etiqueta", "Servicio General"),
-                            descripcion = o.optString("descripcion", ""),
+                            descripcion = descLimpia,
                             ubicacion = o.optString("ubicacion", "Pénjamo, Gto."),
                             monto = o.optDouble("monto", 0.0),
                             esUrgente = o.optBoolean("es_urgente", false),
-                            estado = o.optString("estado", "pendiente"),
+                            estado = estadoReal,
                             fueEvaluada = o.optBoolean("fue_evaluada", false),
                             nombreCliente = mapaNombres[cId]?.first ?: "Cliente Local",
                             nombreTrabajador = mapaNombres[tId]?.first ?: "Especialista",
@@ -744,15 +762,67 @@ object SupabaseService {
             emptyList()
         }
 
-    suspend fun actualizarEstadoSolicitud(solicitudId: String, nuevoEstado: String): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val payload = JSONObject().apply { put("estado", nuevoEstado) }
-                peticionHttp("$REST_URL/solicitudes?id=eq.$solicitudId", "PATCH", payload.toString()).first in 200..299
-            } catch (_: Exception) {
-                false
+    /**
+     * Actualiza el estado de una solicitud. Si la tabla SQL tiene activo el CHECK constraint original
+     * (solo pendiente, en_ejecucion, completado, rechazado), aplica respaldo automático sin perder el estado.
+     */
+    suspend fun actualizarEstadoSolicitud(
+        solicitudId: String,
+        nuevoEstado: String,
+        descripcionActual: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val descBase = descripcionActual
+                ?.removePrefix(PREFIJO_ESPERANDO)
+                ?.removePrefix(PREFIJO_CANCELADA)
+
+            val payloadDirecto = JSONObject().apply {
+                put("estado", nuevoEstado)
+                if (descBase != null && (nuevoEstado == "completado" || nuevoEstado == "en_ejecucion")) {
+                    put("descripcion", descBase)
+                }
             }
+            val (codeDirecto, _) = peticionHttp(
+                "$REST_URL/solicitudes?id=eq.$solicitudId",
+                "PATCH",
+                payloadDirecto.toString()
+            )
+            if (codeDirecto in 200..299) return@withContext true
+
+            // Respaldo compatible con CHECK constraint original de Supabase
+            val descActual = descBase ?: run {
+                val (c, r) = peticionHttp("$REST_URL/solicitudes?id=eq.$solicitudId&select=descripcion")
+                if (c in 200..299 && r.isNotBlank()) {
+                    val arr = JSONArray(r)
+                    if (arr.length() > 0) {
+                        arr.getJSONObject(0).optString("descripcion", "")
+                            .removePrefix(PREFIJO_ESPERANDO)
+                            .removePrefix(PREFIJO_CANCELADA)
+                    } else ""
+                } else ""
+            }
+
+            val payloadFallback = when (nuevoEstado) {
+                "cancelada" -> JSONObject().apply {
+                    put("estado", "rechazado")
+                    put("descripcion", "$PREFIJO_CANCELADA$descActual")
+                }
+                "esperando_confirmacion" -> JSONObject().apply {
+                    put("estado", "en_ejecucion")
+                    put("descripcion", "$PREFIJO_ESPERANDO$descActual")
+                }
+                else -> return@withContext false
+            }
+
+            peticionHttp(
+                "$REST_URL/solicitudes?id=eq.$solicitudId",
+                "PATCH",
+                payloadFallback.toString()
+            ).first in 200..299
+        } catch (_: Exception) {
+            false
         }
+    }
 }
 
 // ============================================================================
@@ -997,9 +1067,17 @@ fun HabilioApp() {
                         solicitudEnSeguimiento = solicitud
                         pantallaActual = RutaHabilio.SEGUIMIENTO_SOLICITUD
                     },
-                    alLiberarPago = { solicitudId ->
+                    alLiberarPago = { solicitud ->
+                        // Actualización optimista inmediata a completado
+                        solicitudesUsuario = solicitudesUsuario.map {
+                            if (it.id == solicitud.id) it.copy(estado = "completado") else it
+                        }
                         scope.launch {
-                            SupabaseService.actualizarEstadoSolicitud(solicitudId, "completado")
+                            SupabaseService.actualizarEstadoSolicitud(
+                                solicitudId = solicitud.id,
+                                nuevoEstado = "completado",
+                                descripcionActual = solicitud.descripcion
+                            )
                             recargarDatosGlobales()
                         }
                     },
@@ -1024,15 +1102,42 @@ fun HabilioApp() {
                             especialista = espAsociado,
                             alVolver = { pantallaActual = RutaHabilio.PERFIL_CLIENTE },
                             alRefrescar = { recargarDatosGlobales() },
-                            alConfirmarCierre = {
+                            alCancelarPedido = {
+                                // Actualización optimista: cambia a cancelada sin eliminarla del historial
+                                val actualizada = solActual.copy(estado = "cancelada")
+                                solicitudEnSeguimiento = actualizada
+                                solicitudesUsuario = solicitudesUsuario.map {
+                                    if (it.id == solActual.id) actualizada else it
+                                }
                                 scope.launch {
-                                    SupabaseService.actualizarEstadoSolicitud(solActual.id, "completado")
+                                    SupabaseService.actualizarEstadoSolicitud(
+                                        solicitudId = solActual.id,
+                                        nuevoEstado = "cancelada",
+                                        descripcionActual = solActual.descripcion
+                                    )
+                                    recargarDatosGlobales()
+                                }
+                            },
+                            alConfirmarCierre = {
+                                // El cliente confirma que el trabajo fue completado
+                                val actualizada = solActual.copy(estado = "completado")
+                                solicitudEnSeguimiento = actualizada
+                                solicitudesUsuario = solicitudesUsuario.map {
+                                    if (it.id == solActual.id) actualizada else it
+                                }
+                                scope.launch {
+                                    SupabaseService.actualizarEstadoSolicitud(
+                                        solicitudId = solActual.id,
+                                        nuevoEstado = "completado",
+                                        descripcionActual = solActual.descripcion
+                                    )
                                     recargarDatosGlobales()
                                 }
                             },
                             alCalificar = {
                                 if (espAsociado != null) {
                                     trabajadorSeleccionado = espAsociado
+                                    solicitudAEvaluar = solActual
                                     mostrarModalCalificar = true
                                 }
                             },
@@ -1053,9 +1158,17 @@ fun HabilioApp() {
                     solicitudes = solicitudesUsuario,
                     cargando = cargandoDatos,
                     alRefrescar = { recargarDatosGlobales() },
-                    alCambiarEstadoSolicitud = { solicitudId, nuevoEstado ->
+                    alCambiarEstadoSolicitud = { solicitud, nuevoEstado ->
+                        // Actualización optimista inmediata en la vista del trabajador
+                        solicitudesUsuario = solicitudesUsuario.map {
+                            if (it.id == solicitud.id) it.copy(estado = nuevoEstado) else it
+                        }
                         scope.launch {
-                            SupabaseService.actualizarEstadoSolicitud(solicitudId, nuevoEstado)
+                            SupabaseService.actualizarEstadoSolicitud(
+                                solicitudId = solicitud.id,
+                                nuevoEstado = nuevoEstado,
+                                descripcionActual = solicitud.descripcion
+                            )
                             recargarDatosGlobales()
                         }
                     },
@@ -1180,11 +1293,9 @@ fun HabilioApp() {
                         scope.launch {
                             SupabaseService.publicarResena(trab.id, autor, comentario, estrellas)
 
-                            // Marcar el pedido específico como evaluado
                             solicitudAEvaluar?.let { sol ->
                                 SupabaseService.marcarSolicitudEvaluada(sol.id)
 
-                                // 1. ACTUALIZACIÓN OPTIMISTA (Desactiva el botón al instante)
                                 solicitudesUsuario = solicitudesUsuario.map {
                                     if (it.id == sol.id) it.copy(fueEvaluada = true) else it
                                 }
@@ -1194,9 +1305,8 @@ fun HabilioApp() {
                             }
 
                             mostrarModalCalificar = false
-                            solicitudAEvaluar = null // Limpiar estado
+                            solicitudAEvaluar = null
 
-                            // 2. Refrescar datos globales en segundo plano
                             recargarDatosGlobales()
                         }
                     }
@@ -4274,14 +4384,16 @@ fun PantallaPerfilCliente(
     solicitudes: List<SolicitudItem>,
     alEditarPerfil: () -> Unit,
     alVerSeguimientoSolicitud: (SolicitudItem) -> Unit,
-    alLiberarPago: (String) -> Unit,
-    alCalificarTrabajador: (SolicitudItem) -> Unit, // ACTUALIZADO PARA RECIBIR SOLICITUD COMPLETA
+    alLiberarPago: (SolicitudItem) -> Unit,
+    alCalificarTrabajador: (SolicitudItem) -> Unit,
     alIrAExplorar: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
     val totalPedidos = solicitudes.size
     val totalCompletados = solicitudes.count { it.estado == "completado" }
-    val enCurso = solicitudes.filter { it.estado == "pendiente" || it.estado == "en_ejecucion" }
+    val enCurso = solicitudes.filter {
+        it.estado == "pendiente" || it.estado == "en_ejecucion" || it.estado == "esperando_confirmacion"
+    }
     val montoAcordado = enCurso.sumOf { it.monto }
 
     Scaffold(
@@ -4437,6 +4549,9 @@ fun PantallaPerfilCliente(
             solicitudes.forEach { sol ->
                 val completado = sol.estado == "completado"
                 val rechazado = sol.estado == "rechazado"
+                val cancelada = sol.estado == "cancelada"
+                val esperandoConfirmacion = sol.estado == "esperando_confirmacion"
+
                 HabilioTarjeta(modifier = Modifier.padding(bottom = 14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -4458,7 +4573,9 @@ fun PantallaPerfilCliente(
 
                         val (textoBadge, colorTextoBadge, colorFondoBadge) = when (sol.estado) {
                             "completado" -> Triple("★ Completado", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
+                            "esperando_confirmacion" -> Triple("⏳ Por confirmar", HabilioTheme.AmarilloPrimario, HabilioTheme.FondoAmarilloSuave)
                             "en_ejecucion" -> Triple("● En ejecución", HabilioTheme.AmarilloPrimario, HabilioTheme.FondoAmarilloSuave)
+                            "cancelada" -> Triple("✕ Cancelada", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
                             "rechazado" -> Triple("✕ Rechazado", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
                             else -> Triple("● Pendiente", HabilioTheme.AzulVerificado, HabilioTheme.FondoAzulSuave)
                         }
@@ -4476,15 +4593,25 @@ fun PantallaPerfilCliente(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (completado) "✓ Servicio finalizado" else "🤝 Acuerdo directo en curso",
+                                text = when {
+                                    completado -> "✓ Servicio finalizado"
+                                    cancelada -> "✕ Solicitud cancelada por ti"
+                                    rechazado -> "✕ Solicitud rechazada"
+                                    esperandoConfirmacion -> "⏳ Especialista terminó • Confirma el cierre"
+                                    else -> "🤝 Acuerdo directo en curso"
+                                },
                                 fontSize = 12.sp,
-                                color = HabilioTheme.TextoSecundario
+                                color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoSecundario
                             )
                             Text(
                                 text = "$${String.format("%.2f", sol.monto)} MXN",
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 16.sp,
-                                color = if (completado) HabilioTheme.VerdeExito else HabilioTheme.AmarilloPrimario
+                                color = when {
+                                    completado -> HabilioTheme.VerdeExito
+                                    cancelada || rechazado -> HabilioTheme.TextoSecundario
+                                    else -> HabilioTheme.AmarilloPrimario
+                                }
                             )
                         }
                     }
@@ -4505,9 +4632,9 @@ fun PantallaPerfilCliente(
                             Text("Ver detalle", color = HabilioTheme.TextoPrimario, fontSize = 13.sp)
                         }
 
-                        if (!completado && !rechazado) {
+                        if (!completado && !rechazado && !cancelada) {
                             Button(
-                                onClick = { alLiberarPago(sol.id) },
+                                onClick = { alLiberarPago(sol) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 48.dp),
@@ -4563,18 +4690,22 @@ fun PantallaSolicitudesTrabajador(
     solicitudes: List<SolicitudItem>,
     cargando: Boolean,
     alRefrescar: () -> Unit,
-    alCambiarEstadoSolicitud: (solicitudId: String, nuevoEstado: String) -> Unit,
+    alCambiarEstadoSolicitud: (solicitud: SolicitudItem, nuevoEstado: String) -> Unit,
     alIrAMiTaller: () -> Unit,
     alCambiarRol: () -> Unit
 ) {
     var filtroSeleccionado by remember { mutableStateOf("Todas") }
     val pendientesCount = solicitudes.count { it.estado == "pendiente" }
-    val enCursoCount = solicitudes.count { it.estado == "en_ejecucion" }
+    val enCursoCount = solicitudes.count {
+        it.estado == "en_ejecucion" || it.estado == "esperando_confirmacion"
+    }
 
     val solicitudesFiltradas = remember(solicitudes, filtroSeleccionado) {
         when (filtroSeleccionado) {
             "Nuevas" -> solicitudes.filter { it.estado == "pendiente" }
-            "En curso" -> solicitudes.filter { it.estado == "en_ejecucion" }
+            "En curso" -> solicitudes.filter {
+                it.estado == "en_ejecucion" || it.estado == "esperando_confirmacion"
+            }
             "Completadas" -> solicitudes.filter { it.estado == "completado" }
             else -> solicitudes
         }
@@ -4674,16 +4805,22 @@ fun PantallaSolicitudesTrabajador(
 
             if (!cargando) {
                 solicitudesFiltradas.forEach { sol ->
-                    if (sol.estado == "en_ejecucion" || sol.estado == "completado") {
+                    if (sol.estado == "en_ejecucion" ||
+                        sol.estado == "esperando_confirmacion" ||
+                        sol.estado == "completado"
+                    ) {
                         TarjetaSolicitudEnEjecucion(
                             solicitud = sol,
-                            alTerminarTrabajo = { alCambiarEstadoSolicitud(sol.id, "completado") }
+                            alTerminarTrabajo = {
+                                // El trabajador solicita confirmación del cliente antes de pasar a completado
+                                alCambiarEstadoSolicitud(sol, "esperando_confirmacion")
+                            }
                         )
                     } else {
                         TarjetaSolicitudNueva(
                             solicitud = sol,
-                            alAceptar = { alCambiarEstadoSolicitud(sol.id, "en_ejecucion") },
-                            alRechazar = { alCambiarEstadoSolicitud(sol.id, "rechazado") }
+                            alAceptar = { alCambiarEstadoSolicitud(sol, "en_ejecucion") },
+                            alRechazar = { alCambiarEstadoSolicitud(sol, "rechazado") }
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -4699,6 +4836,9 @@ private fun TarjetaSolicitudNueva(
     alAceptar: () -> Unit,
     alRechazar: () -> Unit
 ) {
+    val esCancelada = solicitud.estado == "cancelada"
+    val esRechazada = solicitud.estado == "rechazado"
+
     HabilioTarjeta {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -4714,10 +4854,16 @@ private fun TarjetaSolicitudNueva(
                 }
             }
 
+            val textoEstado = when {
+                esCancelada -> "✕ Cancelada por cliente"
+                esRechazada -> "Rechazada"
+                else -> "⏱ Nueva"
+            }
+
             HabilioBadge(
-                texto = if (solicitud.estado == "rechazado") "Rechazada" else "⏱ Nueva",
-                colorTexto = if (solicitud.esUrgente) HabilioTheme.RojoUrgente else HabilioTheme.TextoSecundario,
-                colorFondo = if (solicitud.esUrgente) HabilioTheme.FondoRojoSuave else HabilioTheme.SuperficieElevada
+                texto = textoEstado,
+                colorTexto = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.TextoSecundario,
+                colorFondo = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.FondoRojoSuave else HabilioTheme.SuperficieElevada
             )
         }
 
@@ -4749,7 +4895,16 @@ private fun TarjetaSolicitudNueva(
                         color = HabilioTheme.AmarilloPrimario
                     )
                 }
-                Text("✓ Solicitud activa", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = HabilioTheme.VerdeExito)
+                Text(
+                    text = when {
+                        esCancelada -> "✕ Cancelada"
+                        esRechazada -> "✕ Rechazada"
+                        else -> "✓ Solicitud activa"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.VerdeExito
+                )
             }
         }
 
@@ -4797,7 +4952,12 @@ private fun TarjetaSolicitudEnEjecucion(
     alTerminarTrabajo: () -> Unit
 ) {
     val completada = solicitud.estado == "completado"
-    HabilioTarjeta(colorBorde = HabilioTheme.VerdeExito, grosorBorde = 1.5.dp) {
+    val esperandoConfirmacion = solicitud.estado == "esperando_confirmacion"
+
+    HabilioTarjeta(
+        colorBorde = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
+        grosorBorde = 1.5.dp
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -4807,8 +4967,8 @@ private fun TarjetaSolicitudEnEjecucion(
                 AvatarUsuario(
                     tamano = 44.dp,
                     icono = Icons.Outlined.WorkOutline,
-                    colorIcono = HabilioTheme.VerdeExito,
-                    colorFondo = HabilioTheme.FondoVerdeSuave
+                    colorIcono = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
+                    colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
@@ -4818,9 +4978,13 @@ private fun TarjetaSolicitudEnEjecucion(
             }
 
             HabilioBadge(
-                texto = if (completada) "✓ Completado" else "● En Ejecución",
-                colorTexto = HabilioTheme.VerdeExito,
-                colorFondo = HabilioTheme.FondoVerdeSuave
+                texto = when {
+                    completada -> "✓ Completado"
+                    esperandoConfirmacion -> "⏳ Esperando confirmación"
+                    else -> "● En Ejecución"
+                },
+                colorTexto = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
+                colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
             )
         }
 
@@ -4842,10 +5006,18 @@ private fun TarjetaSolicitudEnEjecucion(
                         text = "$${String.format("%.2f", solicitud.monto)} MXN",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 17.sp,
-                        color = HabilioTheme.VerdeExito
+                        color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito
                     )
                 }
-                Text(if (completada) "✓ Trabajo concluido" else "🛠️ En proceso", fontSize = 12.sp)
+                Text(
+                    text = when {
+                        completada -> "✓ Trabajo concluido"
+                        esperandoConfirmacion -> "⏳ Por confirmar cliente"
+                        else -> "🛠️ En proceso"
+                    },
+                    fontSize = 12.sp,
+                    color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoPrimario
+                )
             }
         }
 
@@ -4853,18 +5025,33 @@ private fun TarjetaSolicitudEnEjecucion(
             Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = alTerminarTrabajo,
+                enabled = !esperandoConfirmacion,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 50.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = HabilioTheme.VerdeExito,
-                    contentColor = HabilioTheme.TextoSobreAmarillo
+                    contentColor = HabilioTheme.TextoSobreAmarillo,
+                    disabledContainerColor = HabilioTheme.FondoAmarilloSuave,
+                    disabledContentColor = HabilioTheme.AmarilloPrimario
                 )
             ) {
-                Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(
+                    imageVector = if (esperandoConfirmacion) Icons.Default.HourglassEmpty else Icons.Default.CheckCircleOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Marcar Trabajo como Terminado", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                Text(
+                    text = if (esperandoConfirmacion) {
+                        "Esperando confirmación del cliente"
+                    } else {
+                        "Marcar Trabajo como Terminado"
+                    },
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 13.sp
+                )
             }
         }
     }
@@ -5177,6 +5364,7 @@ fun PantallaSeguimientoSolicitud(
     especialista: PerfilUsuario?,
     alVolver: () -> Unit,
     alRefrescar: () -> Unit,
+    alCancelarPedido: () -> Unit,
     alConfirmarCierre: () -> Unit,
     alCalificar: () -> Unit,
     alVerPerfilTrabajador: () -> Unit
@@ -5187,9 +5375,12 @@ fun PantallaSeguimientoSolicitud(
     }
 
     val esRechazado = solicitud.estado == "rechazado"
+    val esCancelada = solicitud.estado == "cancelada"
+    val esperandoConfirmacion = solicitud.estado == "esperando_confirmacion"
+
     val pasoActual = when (solicitud.estado) {
         "pendiente" -> 1
-        "en_ejecucion" -> 2
+        "en_ejecucion", "esperando_confirmacion" -> 2
         "completado" -> 3
         else -> 0
     }
@@ -5239,23 +5430,27 @@ fun PantallaSeguimientoSolicitud(
             // Encabezado principal del estado actual
             HabilioTarjeta(
                 colorBorde = when {
-                    esRechazado -> HabilioTheme.RojoUrgente
+                    esRechazado || esCancelada -> HabilioTheme.RojoUrgente
                     pasoActual == 3 -> HabilioTheme.VerdeExito
                     else -> HabilioTheme.AmarilloPrimario.copy(alpha = 0.6f)
                 },
                 grosorBorde = 1.5.dp
             ) {
                 val tituloEstado = when {
+                    esCancelada -> "Solicitud cancelada"
                     esRechazado -> "Solicitud rechazada por el especialista"
                     pasoActual == 1 -> "Esperando confirmación del especialista"
+                    esperandoConfirmacion -> "Especialista finalizó • Esperando tu confirmación"
                     pasoActual == 2 -> "Trabajo en ejecución"
                     else -> "¡Servicio concluido con éxito!"
                 }
                 val subtituloEstado = when {
+                    esCancelada -> "Cancelaste esta solicitud. El registro se conserva en tu historial de servicios."
                     esRechazado -> "El trabajador no pudo atender esta solicitud en este momento. Puedes buscar otro especialista disponible."
                     pasoActual == 1 -> "Tu solicitud ya fue enviada a ${solicitud.nombreTrabajador}. Te notificaremos en cuanto la acepte."
+                    esperandoConfirmacion -> "${solicitud.nombreTrabajador} marcó el trabajo como terminado. Revisa el resultado y presiona el botón verde para confirmar."
                     pasoActual == 2 -> "${solicitud.nombreTrabajador} aceptó tu solicitud y el trabajo está en proceso."
-                    else -> "El servicio ha sido marcado como finalizado. Ya puedes dejar tu reseña y calificación."
+                    else -> "El servicio ha sido confirmado como finalizado por ambas partes. Ya puedes dejar tu reseña y calificación."
                 }
 
                 Text(
@@ -5263,7 +5458,7 @@ fun PantallaSeguimientoSolicitud(
                     fontSize = 19.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = when {
-                        esRechazado -> HabilioTheme.RojoUrgente
+                        esRechazado || esCancelada -> HabilioTheme.RojoUrgente
                         pasoActual == 3 -> HabilioTheme.VerdeExito
                         else -> HabilioTheme.AmarilloPrimario
                     }
@@ -5278,44 +5473,72 @@ fun PantallaSeguimientoSolicitud(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                if (esRechazado) {
-                    PasoRastreoPedido(
-                        titulo = "Solicitud enviada",
-                        subtitulo = "Registrada con folio $folioCorto",
-                        completado = true,
-                        activo = false,
-                        mostrarLineaInferior = true
-                    )
-                    PasoRastreoPedido(
-                        titulo = "Solicitud rechazada",
-                        subtitulo = "El especialista no tenía disponibilidad para este trabajo",
-                        completado = false,
-                        activo = true,
-                        esError = true,
-                        mostrarLineaInferior = false
-                    )
-                } else {
-                    PasoRastreoPedido(
-                        titulo = "1. Solicitud enviada",
-                        subtitulo = "Enviada a ${solicitud.nombreTrabajador} con presupuesto propuesto",
-                        completado = pasoActual >= 1,
-                        activo = pasoActual == 1,
-                        mostrarLineaInferior = true
-                    )
-                    PasoRastreoPedido(
-                        titulo = "2. Solicitud aceptada y en ejecución",
-                        subtitulo = if (pasoActual >= 2) "El especialista confirmó y realiza el servicio" else "Pendiente de aceptación del especialista",
-                        completado = pasoActual >= 2,
-                        activo = pasoActual == 2,
-                        mostrarLineaInferior = true
-                    )
-                    PasoRastreoPedido(
-                        titulo = "3. Trabajo verificado y concluido",
-                        subtitulo = if (pasoActual >= 3) "Servicio finalizado satisfactoriamente" else "Se completará al terminar el trabajo",
-                        completado = pasoActual >= 3,
-                        activo = pasoActual == 3,
-                        mostrarLineaInferior = false
-                    )
+                when {
+                    esCancelada -> {
+                        PasoRastreoPedido(
+                            titulo = "Solicitud enviada",
+                            subtitulo = "Registrada con folio $folioCorto",
+                            completado = true,
+                            activo = false,
+                            mostrarLineaInferior = true
+                        )
+                        PasoRastreoPedido(
+                            titulo = "Pedido cancelado por el cliente",
+                            subtitulo = "La solicitud fue cancelada y archivada en tu historial",
+                            completado = false,
+                            activo = true,
+                            esError = true,
+                            mostrarLineaInferior = false
+                        )
+                    }
+                    esRechazado -> {
+                        PasoRastreoPedido(
+                            titulo = "Solicitud enviada",
+                            subtitulo = "Registrada con folio $folioCorto",
+                            completado = true,
+                            activo = false,
+                            mostrarLineaInferior = true
+                        )
+                        PasoRastreoPedido(
+                            titulo = "Solicitud rechazada",
+                            subtitulo = "El especialista no tenía disponibilidad para este trabajo",
+                            completado = false,
+                            activo = true,
+                            esError = true,
+                            mostrarLineaInferior = false
+                        )
+                    }
+                    else -> {
+                        PasoRastreoPedido(
+                            titulo = "1. Solicitud enviada",
+                            subtitulo = "Enviada a ${solicitud.nombreTrabajador} con presupuesto propuesto",
+                            completado = pasoActual >= 1,
+                            activo = pasoActual == 1,
+                            mostrarLineaInferior = true
+                        )
+                        PasoRastreoPedido(
+                            titulo = if (esperandoConfirmacion) "2. Trabajo terminado por especialista" else "2. Solicitud aceptada y en ejecución",
+                            subtitulo = when {
+                                esperandoConfirmacion -> "El especialista reportó haber concluido • Pendiente de tu confirmación"
+                                pasoActual >= 2 -> "El especialista confirmó y realiza el servicio"
+                                else -> "Pendiente de aceptación del especialista"
+                            },
+                            completado = pasoActual >= 2,
+                            activo = pasoActual == 2,
+                            mostrarLineaInferior = true
+                        )
+                        PasoRastreoPedido(
+                            titulo = "3. Trabajo verificado y concluido",
+                            subtitulo = when {
+                                pasoActual >= 3 -> "Servicio finalizado y confirmado satisfactoriamente"
+                                esperandoConfirmacion -> "Presiona 'Confirmar que el servicio fue completado' abajo"
+                                else -> "Se completará cuando ambos confirmen el cierre del trabajo"
+                            },
+                            completado = pasoActual >= 3,
+                            activo = pasoActual == 3 || esperandoConfirmacion,
+                            mostrarLineaInferior = false
+                        )
+                    }
                 }
             }
 
@@ -5394,10 +5617,31 @@ fun PantallaSeguimientoSolicitud(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            if (!esRechazado && pasoActual < 3) {
-                // Nuevo botón de "Cancelar pedido" en color rojo
+            if (!esRechazado && !esCancelada && pasoActual < 3) {
+                if (pasoActual == 2) {
+                    // Botón verde para confirmar que el servicio fue completado (especialmente cuando esperandoConfirmacion == true)
+                    Button(
+                        onClick = alConfirmarCierre,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = HabilioTheme.VerdeExito,
+                            contentColor = HabilioTheme.TextoSobreAmarillo
+                        )
+                    ) {
+                        Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Confirmar que el servicio fue completado", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // Botón rojo para cancelar el pedido manteniéndolo en el historial
                 Button(
-                    onClick = { /* TODO: Agrega aquí el callback para cancelar (ej. alCancelarPedido()) */ },
+                    onClick = alCancelarPedido,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 52.dp),
@@ -5412,22 +5656,12 @@ fun PantallaSeguimientoSolicitud(
                     Text("Cancelar pedido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
             } else if (pasoActual == 3) {
-                // Nuevo botón verde para confirmar que el servicio fue completado
-                Button(
-                    onClick = alConfirmarCierre,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = HabilioTheme.VerdeExito,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Confirmar que el servicio fue completado", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
-                }
+                val yaEvaluada = solicitud.fueEvaluada
+                BotonPrimarioHabilio(
+                    texto = if (yaEvaluada) "★ Servicio Evaluado" else "★ Calificar y Recomendar al Especialista",
+                    habilitado = !yaEvaluada,
+                    alClick = alCalificar
+                )
             }
         }
     }

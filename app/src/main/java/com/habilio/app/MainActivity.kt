@@ -175,7 +175,6 @@ object SupabaseService {
     private const val PREFIJO_CANCELADA = "[CANCELADA] "
     private const val PREFIJO_ESPERANDO = "[POR_CONFIRMAR] "
 
-    // Token de sesión activo para respaldar políticas de seguridad (S-01)
     private var tokenSesionActual: String? = null
 
     fun cerrarSesionToken() {
@@ -370,7 +369,7 @@ object SupabaseService {
                 return@withContext Result.failure(Exception("No se pudo crear la cuenta en Supabase Auth."))
             }
 
-            // RNF-01 / H-02: No afirmar "verificado" ni otorgar 5.0 o Premium sin evidencia previa
+            // No afirmar "verificado" ni otorgar 5.0 o Premium sin evidencia previa
             val descripcionGenerada = if (rol == "trabajador") {
                 val detalleEsp = if (especialidad.isNotBlank()) " Especialidad: ${especialidad.trim()}." else ""
                 "Especialista en $oficio.$detalleEsp Atención $modalidad en $zona."
@@ -591,7 +590,7 @@ object SupabaseService {
             }
             val exito = peticionHttp("$REST_URL/evidencias", "POST", payload.toString()).first in 200..299
             if (exito) {
-                // RNF-01: Al subir evidencia fotográfica real, el perfil acredita experiencia comprobable
+                // Al subir evidencia fotográfica real, el perfil acredita experiencia comprobable
                 val updatePayload = JSONObject().apply { put("es_premium", true) }
                 peticionHttp("$REST_URL/perfiles?id=eq.$trabajadorId", "PATCH", updatePayload.toString())
             }
@@ -728,7 +727,6 @@ object SupabaseService {
                         val estadoCrudo = o.optString("estado", "pendiente")
                         val descCruda = o.optString("descripcion", "")
 
-                        // Decodificación compatible si la base de datos tiene CHECK constraint de 4 estados
                         val (estadoReal, descLimpia) = when {
                             descCruda.startsWith(PREFIJO_CANCELADA) -> {
                                 "cancelada" to descCruda.removePrefix(PREFIJO_CANCELADA)
@@ -789,7 +787,6 @@ object SupabaseService {
             )
             if (codeDirecto in 200..299) return@withContext true
 
-            // Respaldo compatible con CHECK constraint original de Supabase
             val descActual = descBase ?: run {
                 val (c, r) = peticionHttp("$REST_URL/solicitudes?id=eq.$solicitudId&select=descripcion")
                 if (c in 200..299 && r.isNotBlank()) {
@@ -909,7 +906,6 @@ fun HabilioApp() {
         pantallaActual = RutaHabilio.INICIO_ROL
     }
 
-    // Manejo natural del botón físico "Atrás" de Android (S-04 / INC-03)
     BackHandler(enabled = pantallaActual != RutaHabilio.INICIO_ROL) {
         when (pantallaActual) {
             RutaHabilio.LOGIN_CLIENTE, RutaHabilio.LOGIN_TRABAJADOR -> pantallaActual = RutaHabilio.INICIO_ROL
@@ -1068,7 +1064,6 @@ fun HabilioApp() {
                         pantallaActual = RutaHabilio.SEGUIMIENTO_SOLICITUD
                     },
                     alLiberarPago = { solicitud ->
-                        // Actualización optimista inmediata a completado
                         solicitudesUsuario = solicitudesUsuario.map {
                             if (it.id == solicitud.id) it.copy(estado = "completado") else it
                         }
@@ -1103,7 +1098,6 @@ fun HabilioApp() {
                             alVolver = { pantallaActual = RutaHabilio.PERFIL_CLIENTE },
                             alRefrescar = { recargarDatosGlobales() },
                             alCancelarPedido = {
-                                // Actualización optimista: cambia a cancelada sin eliminarla del historial
                                 val actualizada = solActual.copy(estado = "cancelada")
                                 solicitudEnSeguimiento = actualizada
                                 solicitudesUsuario = solicitudesUsuario.map {
@@ -1159,7 +1153,6 @@ fun HabilioApp() {
                     cargando = cargandoDatos,
                     alRefrescar = { recargarDatosGlobales() },
                     alCambiarEstadoSolicitud = { solicitud, nuevoEstado ->
-                        // Actualización optimista inmediata en la vista del trabajador
                         solicitudesUsuario = solicitudesUsuario.map {
                             if (it.id == solicitud.id) it.copy(estado = nuevoEstado) else it
                         }
@@ -1542,7 +1535,7 @@ fun HabilioTopBar(
                             if (modoTrabajador) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 HabilioBadge(
-                                    texto = "● Modo Trabajador",
+                                    texto = "● Modo trabajador",
                                     colorTexto = HabilioTheme.VerdeExito,
                                     colorFondo = HabilioTheme.FondoVerdeSuave
                                 )
@@ -2444,7 +2437,7 @@ fun ModalSolicitudConfirmada(
                 Spacer(modifier = Modifier.height(22.dp))
 
                 BotonPrimarioHabilio(
-                    texto = "Aceptar y Ver Estatus",
+                    texto = "Aceptar y ver estatus",
                     alClick = alAceptarYVerEstatus,
                     mostrarFlecha = true
                 )
@@ -2975,7 +2968,8 @@ fun PantallaRegistroCliente(
 
             HabilioCampoTexto(
                 etiqueta = "Correo electrónico",
-                etiquetaDerecha = "Opcional",
+                etiquetaDerecha = "Requerido",
+                colorEtiquetaDerecha = HabilioTheme.VerdeExito,
                 valor = correo,
                 alCambiarValor = { correo = it },
                 placeholder = "tu@correo.com",
@@ -3000,7 +2994,6 @@ fun PantallaRegistroCliente(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // S-11: Aviso breve de privacidad
             Text(
                 text = "🔒 Aviso de privacidad: Tus datos de contacto se utilizan únicamente dentro de Habilio para coordinar solicitudes de servicio en tu comunidad.",
                 fontSize = 11.sp,
@@ -3661,9 +3654,8 @@ fun PantallaBuscadorCliente(
     var categoriaActiva by remember { mutableStateOf("Todos") }
     var zonaActiva by remember { mutableStateOf("Todas las zonas") }
 
-    // H-05: Categorías alineadas incluyendo Costura
     val categorias = listOf("Todos", "Albañilería", "Plomería", "Electricidad", "Costura", "Carpintería", "Herrería", "Pintura")
-    // H-04: Filtro explícito por ubicación / zona geográfica (RF-03)
+
     val zonasDisponibles = listOf("Todas las zonas", "Pénjamo Centro", "Santa Ana Pacueco", "Col. Juárez", "Col. Lindavista")
 
     val trabajadoresFiltrados = remember(trabajadores, busqueda, categoriaActiva, zonaActiva) {
@@ -3730,7 +3722,7 @@ fun PantallaBuscadorCliente(
                 }
             }
 
-            // Selector horizontal de Zona (RF-03)
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3853,7 +3845,7 @@ private fun TarjetaEspecialistaBuscador(
     alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alVerDetalle: () -> Unit
 ) {
-    // RNF-01 / H-02: La verificación y reputación dependen de evidencias reales y reseñas
+    // La verificación y reputación dependen de evidencias reales y reseñas
     val tieneEvidenciaComprobable = evidencias.isNotEmpty()
 
     HabilioTarjeta {
@@ -3995,7 +3987,7 @@ private fun TarjetaEspecialistaBuscador(
                 ),
                 modifier = Modifier.heightIn(min = 44.dp)
             ) {
-                Text("Ver Especialista", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                Text("Ver especialista", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
             }
         }
     }
@@ -4174,7 +4166,7 @@ fun PantallaDetalleEspecialista(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // H-06 / RF-04: Solo permitir calificar cuando exista un servicio completado con este trabajador
+            // Solo permitir calificar cuando exista un servicio completado con este trabajador
 
 
             Spacer(modifier = Modifier.height(22.dp))
@@ -4715,7 +4707,7 @@ fun PantallaSolicitudesTrabajador(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Solicitudes de Trabajo", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Solicitudes de trabajo", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "● $pendientesCount pendientes • $enCursoCount en curso",
@@ -4782,7 +4774,7 @@ fun PantallaSolicitudesTrabajador(
                         TarjetaSolicitudEnEjecucion(
                             solicitud = sol,
                             alTerminarTrabajo = {
-                                // El trabajador solicita confirmación del cliente antes de pasar a completado
+                                // Se solicita confirmacion del cliente antes de pasar a completado
                                 alCambiarEstadoSolicitud(sol, "esperando_confirmacion")
                             }
                         )
@@ -4909,7 +4901,7 @@ private fun TarjetaSolicitudNueva(
                 ) {
                     Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Aceptar Solicitud", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                    Text("Aceptar solicitud", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
                 }
             }
         }
@@ -5168,7 +5160,7 @@ fun PantallaTallerTrabajador(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Subir Foto de Trabajo Real", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Subir foto de trabajo real", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("+ Evidencia", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = HabilioTheme.AmarilloPrimario)
                 }
 
@@ -5250,13 +5242,13 @@ fun PantallaTallerTrabajador(
                 ) {
                     Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Subir Evidencia", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text("Subir evidencia", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Text("Mis Evidencias Publicadas (${evidencias.size})", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Mis evidencias publicadas (${evidencias.size})", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
 
             EstadoCargaOVacio(
@@ -5397,7 +5389,6 @@ fun PantallaSeguimientoSolicitud(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Encabezado principal del estado actual
             HabilioTarjeta(
                 colorBorde = when {
                     esRechazado || esCancelada -> HabilioTheme.RojoUrgente
@@ -5514,7 +5505,7 @@ fun PantallaSeguimientoSolicitud(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Detalles del pedido / servicio
+            // Detalles del servicio
             HabilioTarjeta {
                 Text(
                     text = "📦 DETALLES DE LA SOLICITUD",
@@ -5589,7 +5580,6 @@ fun PantallaSeguimientoSolicitud(
 
             if (!esRechazado && !esCancelada && pasoActual < 3) {
                 if (pasoActual == 2) {
-                    // Botón verde para confirmar que el servicio fue completado (especialmente cuando esperandoConfirmacion == true)
                     Button(
                         onClick = alConfirmarCierre,
                         modifier = Modifier
@@ -5609,7 +5599,6 @@ fun PantallaSeguimientoSolicitud(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                // Botón rojo para cancelar el pedido manteniéndolo en el historial
                 Button(
                     onClick = alCancelarPedido,
                     modifier = Modifier

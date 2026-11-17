@@ -93,34 +93,45 @@ class MainActivity : ComponentActivity() {
 // 1. SISTEMA DE DISEÑO Y TOKENS DE COLOR
 // ============================================================================
 object HabilioTheme {
-    val FondoPrincipal = Color(0xFF0E1013)
-    val SuperficieTarjeta = Color(0xFF181B20)
-    val SuperficieInput = Color(0xFF121418)
-    val SuperficieElevada = Color(0xFF22262E)
-    val BordeTarjeta = Color(0xFF2A2F3A)
+    /** Estado observable: al cambiar, toda la UI que lea estos tokens se recompone. */
+    var modoOscuro by mutableStateOf(true)
 
-    val AmarilloPrimario = Color(0xFFF5B811)
-    val FondoAmarilloSuave = Color(0xFF332910)
-    val TextoSobreAmarillo = Color(0xFF111315)
+    private fun c(oscuro: Long, claro: Long) = Color(if (modoOscuro) oscuro else claro)
 
-    val VerdeExito = Color(0xFF12C97D)
-    val FondoVerdeSuave = Color(0xFF132A23)
+    val FondoPrincipal get() = c(0xFF0E1013, 0xFFF3F0E8)
+    val SuperficieTarjeta get() = c(0xFF181B20, 0xFFFFFFFF)
+    val SuperficieInput get() = c(0xFF121418, 0xFFFAF8F3)
+    val SuperficieElevada get() = c(0xFF22262E, 0xFFEAE4D9)
+    val BordeTarjeta get() = c(0xFF2A2F3A, 0xFFDDD6C8)
 
-    val AzulVerificado = Color(0xFF3898FF)
-    val FondoAzulSuave = Color(0xFF132235)
+    val AmarilloPrimario get() = c(0xFFF5B811, 0xFFF59E0B)
+    /** Amarillo para texto, estrellas, iconos y enlaces (más oscuro en claro para contraste). */
+    val AmarilloAcentoTexto get() = c(0xFFF5B811, 0xFFB45309)
+    val FondoAmarilloSuave get() = c(0xFF332910, 0xFFFEF3C7)
+    val TextoSobreAmarillo get() = Color(0xFF111315)
 
-    val RojoUrgente = Color(0xFFFF6B6B)
-    val FondoRojoSuave = Color(0xFF2D181B)
+    val VerdeExito get() = c(0xFF12C97D, 0xFF047857)
+    val FondoVerdeSuave get() = c(0xFF132A23, 0xFFD1FAE5)
 
-    val TextoPrimario = Color(0xFFF4F6F8)
-    val TextoSecundario = Color(0xFFB0B8C4)
-    val TextoPlaceholder = Color(0xFF8A94A6)
+    val AzulVerificado get() = c(0xFF3898FF, 0xFF0369A1)
+    val FondoAzulSuave get() = c(0xFF132235, 0xFFE0F2FE)
+
+    val RojoUrgente get() = c(0xFFFF6B6B, 0xFFB91C1C)
+    val FondoRojoSuave get() = c(0xFF2D181B, 0xFFFEE2E2)
+
+    val TextoPrimario get() = c(0xFFF4F6F8, 0xFF1C1917)
+    val TextoSecundario get() = c(0xFFB0B8C4, 0xFF57534E)
+    val TextoPlaceholder get() = c(0xFF8A94A6, 0xFF78716C)
+
+    /** Sombra de tarjetas: solo en claro, para separarlas del fondo como en el oscuro. */
+    val ElevacionTarjeta: Dp get() = if (modoOscuro) 0.dp else 2.dp
 }
 
 object AppConfig {
     var logoGlobal: Any = R.drawable.logo_habilio
     const val PREFS_NAME = "habilio_preferencias"
     const val KEY_ESCALA_TEXTO = "escala_texto"
+    const val KEY_APARIENCIA = "apariencia" // "sistema" | "claro" | "oscuro"
 }
 
 // ============================================================================
@@ -880,6 +891,34 @@ fun HabilioApp() {
         prefs.edit().putFloat(AppConfig.KEY_ESCALA_TEXTO, nuevaEscala).apply()
     }
 
+    // Apariencia: sistema / claro / oscuro (persistente)
+    var apariencia by remember {
+        mutableStateOf(prefs.getString(AppConfig.KEY_APARIENCIA, "sistema") ?: "sistema")
+    }
+    fun actualizarApariencia(nueva: String) {
+        apariencia = nueva
+        prefs.edit().putString(AppConfig.KEY_APARIENCIA, nueva).apply()
+    }
+    val sistemaOscuro = androidx.compose.foundation.isSystemInDarkTheme()
+    val usarOscuro = when (apariencia) {
+        "claro" -> false
+        "oscuro" -> true
+        else -> sistemaOscuro
+    }
+    // Se asigna durante la composición para que el primer frame ya use la paleta correcta
+    HabilioTheme.modoOscuro = usarOscuro
+
+    // Barras del sistema acordes al tema
+    val actividad = contexto as? ComponentActivity
+    SideEffect {
+        actividad?.enableEdgeToEdge(
+            statusBarStyle = if (usarOscuro) SystemBarStyle.dark(android.graphics.Color.parseColor("#0E1013"))
+            else SystemBarStyle.light(android.graphics.Color.parseColor("#F3F0E8"), android.graphics.Color.parseColor("#F3F0E8")),
+            navigationBarStyle = if (usarOscuro) SystemBarStyle.dark(android.graphics.Color.parseColor("#0E1013"))
+            else SystemBarStyle.light(android.graphics.Color.parseColor("#F3F0E8"), android.graphics.Color.parseColor("#F3F0E8"))
+        )
+    }
+
     var pantallaActual by remember { mutableStateOf(RutaHabilio.INICIO_ROL) }
 
     var usuarioActual by remember { mutableStateOf<PerfilUsuario?>(null) }
@@ -955,13 +994,20 @@ fun HabilioApp() {
         )
     ) {
         MaterialTheme(
-            colorScheme = darkColorScheme(
+            colorScheme = (if (usarOscuro) darkColorScheme() else lightColorScheme()).copy(
                 background = HabilioTheme.FondoPrincipal,
                 surface = HabilioTheme.SuperficieTarjeta,
+                surfaceVariant = HabilioTheme.SuperficieInput,
+                surfaceTint = Color.Transparent,
+                secondaryContainer = HabilioTheme.FondoAmarilloSuave,
+                onSecondaryContainer = HabilioTheme.AmarilloAcentoTexto,
                 primary = HabilioTheme.AmarilloPrimario,
                 onPrimary = HabilioTheme.TextoSobreAmarillo,
                 onBackground = HabilioTheme.TextoPrimario,
-                onSurface = HabilioTheme.TextoPrimario
+                onSurface = HabilioTheme.TextoPrimario,
+                onSurfaceVariant = HabilioTheme.TextoSecundario,
+                outline = HabilioTheme.BordeTarjeta,
+                error = HabilioTheme.RojoUrgente
             )
         ) {
             Surface(modifier = Modifier.fillMaxSize(), color = HabilioTheme.FondoPrincipal) {
@@ -1087,6 +1133,8 @@ fun HabilioApp() {
                         cliente = usuarioActual,
                         solicitudes = solicitudesUsuario,
                         escalaTexto = escalaTexto,
+                        apariencia = apariencia,
+                        alCambiarApariencia = ::actualizarApariencia,
                         alCambiarEscalaTexto = ::actualizarEscalaTexto,
                         alEditarPerfil = { pantallaActual = RutaHabilio.EDITAR_PERFIL },
                         alVerSeguimientoSolicitud = { solicitud ->
@@ -1206,6 +1254,8 @@ fun HabilioApp() {
                         evidencias = todasLasEvidencias.filter { it.trabajadorId == usuarioActual?.id },
                         solicitudes = solicitudesUsuario,
                         escalaTexto = escalaTexto,
+                        apariencia = apariencia,
+                        alCambiarApariencia = ::actualizarApariencia,
                         alCambiarEscalaTexto = ::actualizarEscalaTexto,
                         alEditarPerfil = { pantallaActual = RutaHabilio.EDITAR_PERFIL },
                         alPublicarEvidencia = { titulo, imagenUri ->
@@ -1406,6 +1456,7 @@ fun HabilioTarjeta(
             shape = shape,
             color = colorFondo,
             border = border,
+            shadowElevation = HabilioTheme.ElevacionTarjeta,
             modifier = modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(paddingInterno), content = contenido)
@@ -1415,6 +1466,7 @@ fun HabilioTarjeta(
             shape = shape,
             color = colorFondo,
             border = border,
+            shadowElevation = HabilioTheme.ElevacionTarjeta,
             modifier = modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(paddingInterno), content = contenido)
@@ -1460,7 +1512,7 @@ fun SeccionTamanoTexto(
                     Icon(
                         imageVector = Icons.Outlined.FormatSize,
                         contentDescription = null,
-                        tint = HabilioTheme.AmarilloPrimario,
+                        tint = HabilioTheme.AmarilloAcentoTexto,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1484,7 +1536,7 @@ fun SeccionTamanoTexto(
 
             HabilioBadge(
                 texto = etiquetaActiva,
-                colorTexto = HabilioTheme.AmarilloPrimario,
+                colorTexto = HabilioTheme.AmarilloAcentoTexto,
                 colorFondo = HabilioTheme.FondoAmarilloSuave
             )
         }
@@ -1533,6 +1585,79 @@ fun SeccionTamanoTexto(
                                 textAlign = TextAlign.Center
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Selector de apariencia: Sistema / Claro / Oscuro. */
+@Composable
+fun SeccionApariencia(
+    aparienciaActual: String,
+    alCambiarApariencia: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val opciones = listOf(
+        Triple("sistema", "Sistema", Icons.Outlined.PhoneAndroid),
+        Triple("claro", "Claro", Icons.Outlined.LightMode),
+        Triple("oscuro", "Oscuro", Icons.Outlined.DarkMode)
+    )
+
+    HabilioTarjeta(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(HabilioTheme.FondoAmarilloSuave),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Palette,
+                    contentDescription = null,
+                    tint = HabilioTheme.AmarilloAcentoTexto,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text("Apariencia", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = HabilioTheme.TextoPrimario)
+                Text("Modo claro u oscuro", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            opciones.forEach { (clave, nombre, icono) ->
+                val seleccionado = aparienciaActual == clave
+                Surface(
+                    onClick = { alCambiarApariencia(clave) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (seleccionado) HabilioTheme.AmarilloPrimario else HabilioTheme.SuperficieInput,
+                    border = BorderStroke(1.dp, if (seleccionado) HabilioTheme.AmarilloPrimario else HabilioTheme.BordeTarjeta),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = icono,
+                            contentDescription = null,
+                            tint = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.TextoSecundario,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = nombre,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.TextoPrimario,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
@@ -1626,7 +1751,7 @@ fun ModalVerFotoCompleta(
                         TextButton(onClick = alCerrar) {
                             Text(
                                 text = "Cerrar",
-                                color = HabilioTheme.AmarilloPrimario,
+                                color = HabilioTheme.AmarilloAcentoTexto,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1829,7 +1954,7 @@ fun EstadoCargaOVacio(
                     Icon(
                         imageVector = iconoVacio,
                         contentDescription = null,
-                        tint = HabilioTheme.AmarilloPrimario,
+                        tint = HabilioTheme.AmarilloAcentoTexto,
                         modifier = Modifier.size(40.dp)
                     )
                     Spacer(modifier = Modifier.height(10.dp))
@@ -1866,8 +1991,8 @@ fun HabilioBarraInferior(
     alClickSegundo: () -> Unit
 ) {
     val coloresItem = NavigationBarItemDefaults.colors(
-        selectedIconColor = HabilioTheme.AmarilloPrimario,
-        selectedTextColor = HabilioTheme.AmarilloPrimario,
+        selectedIconColor = HabilioTheme.AmarilloAcentoTexto,
+        selectedTextColor = HabilioTheme.AmarilloAcentoTexto,
         unselectedIconColor = HabilioTheme.TextoSecundario,
         unselectedTextColor = HabilioTheme.TextoSecundario,
         indicatorColor = HabilioTheme.SuperficieTarjeta
@@ -1908,7 +2033,7 @@ fun EncabezadoModal(
             Icon(
                 imageVector = icono,
                 contentDescription = null,
-                tint = HabilioTheme.AmarilloPrimario,
+                tint = HabilioTheme.AmarilloAcentoTexto,
                 modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
@@ -2232,7 +2357,7 @@ fun SelectorFotoPerfil(
                             tamano = 78.dp,
                             esCircular = true,
                             icono = iconoPorDefecto,
-                            colorIcono = HabilioTheme.AmarilloPrimario
+                            colorIcono = HabilioTheme.AmarilloAcentoTexto
                         )
                     }
                 }
@@ -2320,7 +2445,7 @@ fun CheckDeclaracionEdadYPrivacidad(
                     text = "Leer Aviso de Privacidad completo >",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = HabilioTheme.AmarilloPrimario,
+                    color = HabilioTheme.AmarilloAcentoTexto,
                     modifier = Modifier
                         .clickable(role = Role.Button) { mostrarAvisoCompleto = true }
                         .padding(vertical = 2.dp)
@@ -2369,7 +2494,7 @@ private fun ModalAvisoPrivacidad(
                 text = "1. Declaración de Mayoría de Edad",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = HabilioTheme.AmarilloPrimario
+                color = HabilioTheme.AmarilloAcentoTexto
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -2385,7 +2510,7 @@ private fun ModalAvisoPrivacidad(
                 text = "2. Uso y Protección de Datos Personales",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = HabilioTheme.AmarilloPrimario
+                color = HabilioTheme.AmarilloAcentoTexto
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -2512,15 +2637,15 @@ fun ModalSolicitarServicio(
                     value = presupuestoTexto,
                     onValueChange = { presupuestoTexto = it },
                     prefix = {
-                        Text("$", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                        Text("$", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     },
                     suffix = {
-                        Text("MXN", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                        Text("MXN", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                     },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     textStyle = LocalTextStyle.current.copy(
-                        color = HabilioTheme.AmarilloPrimario,
+                        color = HabilioTheme.AmarilloAcentoTexto,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 18.sp
                     ),
@@ -2660,7 +2785,7 @@ fun ModalSolicitudConfirmada(
                                 tamano = 42.dp,
                                 esCircular = true,
                                 icono = Icons.Default.Handyman,
-                                colorIcono = HabilioTheme.AmarilloPrimario
+                                colorIcono = HabilioTheme.AmarilloAcentoTexto
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
@@ -2700,7 +2825,7 @@ fun ModalSolicitudConfirmada(
                                 fontSize = 16.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = HabilioTheme.AmarilloPrimario
+                                color = HabilioTheme.AmarilloAcentoTexto
                             )
                         }
                     }
@@ -2806,7 +2931,7 @@ fun ModalEvaluarServicio(
                         Icon(
                             imageVector = if (i <= estrellasSeleccionadas) Icons.Default.Star else Icons.Outlined.StarBorder,
                             contentDescription = "$i estrellas",
-                            tint = HabilioTheme.AmarilloPrimario,
+                            tint = HabilioTheme.AmarilloAcentoTexto,
                             modifier = Modifier.size(36.dp)
                         )
                     }
@@ -2819,7 +2944,7 @@ fun ModalEvaluarServicio(
                 text = etiquetaEstrellas,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = HabilioTheme.AmarilloPrimario,
+                color = HabilioTheme.AmarilloAcentoTexto,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
@@ -2951,7 +3076,7 @@ fun PantallaInicioRol(
                 titulo = "Cliente",
                 descripcion = "Buscar trabajadores por oficio, revisar fotos de sus trabajos y contratar con confianza.",
                 icono = Icons.Default.Search,
-                colorIcono = HabilioTheme.AmarilloPrimario,
+                colorIcono = HabilioTheme.AmarilloAcentoTexto,
                 colorFondoIcono = HabilioTheme.FondoAmarilloSuave,
                 alClick = alElegirCliente
             )
@@ -3120,7 +3245,7 @@ private fun TarjetaCambioATrabajador(alClick: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Build, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Build, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("¿Haces trabajos de oficio?", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
@@ -3165,7 +3290,7 @@ private fun TarjetaCambioACliente(alClick: () -> Unit) {
                 text = "Ingresar o registrarme como Cliente >",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = HabilioTheme.AmarilloPrimario
+                color = HabilioTheme.AmarilloAcentoTexto
             )
         }
     }
@@ -3441,7 +3566,7 @@ fun PantallaRegistroTrabajador(
                 text = "${(pasoActual * 100) / totalPasos}%",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = HabilioTheme.AmarilloPrimario
+                color = HabilioTheme.AmarilloAcentoTexto
             )
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -3530,7 +3655,7 @@ fun PantallaRegistroTrabajador(
                                                 Icon(
                                                     imageVector = iconoOficio,
                                                     contentDescription = null,
-                                                    tint = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.AmarilloPrimario,
+                                                    tint = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.AmarilloAcentoTexto,
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
@@ -3902,7 +4027,7 @@ fun PantallaEditarPerfil(
                 text = "👤 DATOS GENERALES",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = HabilioTheme.AmarilloPrimario
+                color = HabilioTheme.AmarilloAcentoTexto
             )
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -3953,7 +4078,7 @@ fun PantallaEditarPerfil(
                     text = "🛠️ DATOS DE TU TALLER Y OFICIO",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = HabilioTheme.AmarilloPrimario
+                    color = HabilioTheme.AmarilloAcentoTexto
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -3997,7 +4122,7 @@ fun PantallaEditarPerfil(
                                     Icon(
                                         imageVector = iconoOficio,
                                         contentDescription = null,
-                                        tint = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.AmarilloPrimario,
+                                        tint = if (seleccionado) HabilioTheme.TextoSobreAmarillo else HabilioTheme.AmarilloAcentoTexto,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -4201,9 +4326,9 @@ fun PantallaBuscadorCliente(
                     }
                 }
                 TextButton(onClick = alRefrescar) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Actualizar", color = HabilioTheme.AmarilloPrimario, fontSize = 13.sp)
+                    Text("Actualizar", color = HabilioTheme.AmarilloAcentoTexto, fontSize = 13.sp)
                 }
             }
 
@@ -4354,7 +4479,7 @@ private fun TarjetaEspecialistaBuscador(
                             if (especialista.especialidad.isNotBlank()) " • ${especialista.especialidad}" else "",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = HabilioTheme.AmarilloPrimario,
+                    color = HabilioTheme.AmarilloAcentoTexto,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -4367,7 +4492,7 @@ private fun TarjetaEspecialistaBuscador(
                 if (tieneEvidenciaComprobable) {
                     HabilioBadge(
                         texto = "✓ CON EVIDENCIA",
-                        colorTexto = HabilioTheme.AmarilloPrimario,
+                        colorTexto = HabilioTheme.AmarilloAcentoTexto,
                         colorFondo = HabilioTheme.FondoAmarilloSuave
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -4430,7 +4555,7 @@ private fun TarjetaEspecialistaBuscador(
                             Icon(
                                 imageVector = Icons.Outlined.Image,
                                 contentDescription = null,
-                                tint = if (ev != null) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoSecundario
+                                tint = if (ev != null) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoSecundario
                             )
                             Text(
                                 text = ev?.titulo ?: "Sin foto",
@@ -4553,7 +4678,7 @@ fun PantallaDetalleEspecialista(
                             text = especialista.oficio,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = HabilioTheme.AmarilloPrimario
+                            color = HabilioTheme.AmarilloAcentoTexto
                         )
                         Text(especialista.zona, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                     }
@@ -4573,7 +4698,7 @@ fun PantallaDetalleEspecialista(
                     CajaMetricaDetalle(
                         valor = if (resenas.isNotEmpty()) "${String.format("%.1f", especialista.calificacion)} ★" else "Nuevo",
                         etiqueta = "${resenas.size} reseñas",
-                        colorValor = HabilioTheme.AmarilloPrimario,
+                        colorValor = HabilioTheme.AmarilloAcentoTexto,
                         modifier = Modifier.weight(1f)
                     )
                     CajaMetricaDetalle(
@@ -4627,7 +4752,7 @@ fun PantallaDetalleEspecialista(
                             text = "Especialidad y Servicios Específicos:",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = HabilioTheme.AmarilloPrimario
+                            color = HabilioTheme.AmarilloAcentoTexto
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -4706,7 +4831,7 @@ fun PantallaDetalleEspecialista(
                                     Icon(
                                         imageVector = Icons.Outlined.PhotoCamera,
                                         contentDescription = null,
-                                        tint = HabilioTheme.AmarilloPrimario,
+                                        tint = HabilioTheme.AmarilloAcentoTexto,
                                         modifier = Modifier.size(36.dp)
                                     )
                                     Text(
@@ -4736,7 +4861,7 @@ fun PantallaDetalleEspecialista(
                 Text("Recomendaciones (${resenas.size})", fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 if (puedeCalificar) {
                     TextButton(onClick = alAbrirModalCalificar) {
-                        Text("+ Escribir reseña", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AmarilloPrimario)
+                        Text("+ Escribir reseña", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AmarilloAcentoTexto)
                     }
                 }
             }
@@ -4806,7 +4931,7 @@ private fun TarjetaResena(autor: String, comentario: String, estrellas: Int, fec
     HabilioTarjeta(radioEsquina = 14.dp, paddingInterno = 14.dp) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(text = autor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Text(text = "★".repeat(estrellas.coerceIn(1, 5)), color = HabilioTheme.AmarilloPrimario, fontSize = 14.sp)
+            Text(text = "★".repeat(estrellas.coerceIn(1, 5)), color = HabilioTheme.AmarilloAcentoTexto, fontSize = 14.sp)
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(text = comentario, fontSize = 13.sp, fontStyle = FontStyle.Italic, lineHeight = 19.sp)
@@ -4824,6 +4949,8 @@ fun PantallaPerfilCliente(
     solicitudes: List<SolicitudItem>,
     escalaTexto: Float,
     alCambiarEscalaTexto: (Float) -> Unit,
+    apariencia: String,
+    alCambiarApariencia: (String) -> Unit,
     alEditarPerfil: () -> Unit,
     alVerSeguimientoSolicitud: (SolicitudItem) -> Unit,
     alLiberarPago: (SolicitudItem) -> Unit,
@@ -4911,9 +5038,9 @@ fun PantallaPerfilCliente(
                         border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Editar", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 
@@ -4936,9 +5063,16 @@ fun PantallaPerfilCliente(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            SeccionApariencia(
+                aparienciaActual = apariencia,
+                alCambiarApariencia = alCambiarApariencia
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             HabilioTarjeta {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Actividad", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
@@ -4946,7 +5080,7 @@ fun PantallaPerfilCliente(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CajaMetricaDetalle("$totalPedidos", "Servicios\nPedidos", HabilioTheme.TextoPrimario, Modifier.weight(1f))
                     CajaMetricaDetalle("$totalCompletados", "Trabajos\nHechos", HabilioTheme.VerdeExito, Modifier.weight(1f))
-                    CajaMetricaDetalle("${enCurso.size}", "$${montoAcordado.toInt()} Activos", HabilioTheme.AmarilloPrimario, Modifier.weight(1f))
+                    CajaMetricaDetalle("${enCurso.size}", "$${montoAcordado.toInt()} Activos", HabilioTheme.AmarilloAcentoTexto, Modifier.weight(1f))
                 }
             }
 
@@ -4964,7 +5098,7 @@ fun PantallaPerfilCliente(
                             .background(HabilioTheme.FondoAmarilloSuave),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = HabilioTheme.AmarilloPrimario)
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -5051,7 +5185,7 @@ fun PantallaPerfilCliente(
                                     else -> "🤝 Acuerdo directo en curso"
                                 },
                                 fontSize = 12.sp,
-                                color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoSecundario
+                                color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoSecundario
                             )
                             Text(
                                 text = "$${String.format("%.2f", sol.monto)} MXN",
@@ -5118,7 +5252,7 @@ fun PantallaPerfilCliente(
                             ) {
                                 Text(
                                     text = if (estaEvaluada) "★ Evaluado" else "★ Evaluar",
-                                    color = if (estaEvaluada) HabilioTheme.TextoSecundario else HabilioTheme.AmarilloPrimario,
+                                    color = if (estaEvaluada) HabilioTheme.TextoSecundario else HabilioTheme.AmarilloAcentoTexto,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
@@ -5200,12 +5334,12 @@ fun PantallaSolicitudesTrabajador(
                     Text(
                         text = "● $pendientesCount pendientes • $enCursoCount en curso",
                         fontSize = 13.sp,
-                        color = HabilioTheme.AmarilloPrimario,
+                        color = HabilioTheme.AmarilloAcentoTexto,
                         fontWeight = FontWeight.Medium
                     )
                 }
                 IconButton(onClick = alRefrescar) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refrescar solicitudes", tint = HabilioTheme.AmarilloPrimario)
+                    Icon(Icons.Default.Refresh, contentDescription = "Refrescar solicitudes", tint = HabilioTheme.AmarilloAcentoTexto)
                 }
             }
 
@@ -5341,7 +5475,7 @@ private fun TarjetaSolicitudNueva(
                         text = "$${String.format("%.2f", solicitud.monto)} MXN",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
-                        color = HabilioTheme.AmarilloPrimario
+                        color = HabilioTheme.AmarilloAcentoTexto
                     )
                 }
                 Text(
@@ -5416,7 +5550,7 @@ private fun TarjetaSolicitudEnEjecucion(
                 AvatarUsuario(
                     tamano = 44.dp,
                     icono = Icons.Outlined.WorkOutline,
-                    colorIcono = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
+                    colorIcono = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
                     colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -5432,7 +5566,7 @@ private fun TarjetaSolicitudEnEjecucion(
                     esperandoConfirmacion -> "⏳ Esperando confirmación"
                     else -> "● En Ejecución"
                 },
-                colorTexto = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
+                colorTexto = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
                 colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
             )
         }
@@ -5455,7 +5589,7 @@ private fun TarjetaSolicitudEnEjecucion(
                         text = "$${String.format("%.2f", solicitud.monto)} MXN",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 17.sp,
-                        color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito
+                        color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito
                     )
                 }
                 Text(
@@ -5465,7 +5599,7 @@ private fun TarjetaSolicitudEnEjecucion(
                         else -> "🛠️ En proceso"
                     },
                     fontSize = 12.sp,
-                    color = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.TextoPrimario
+                    color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoPrimario
                 )
             }
         }
@@ -5483,7 +5617,7 @@ private fun TarjetaSolicitudEnEjecucion(
                     containerColor = HabilioTheme.VerdeExito,
                     contentColor = HabilioTheme.TextoSobreAmarillo,
                     disabledContainerColor = HabilioTheme.FondoAmarilloSuave,
-                    disabledContentColor = HabilioTheme.AmarilloPrimario
+                    disabledContentColor = HabilioTheme.AmarilloAcentoTexto
                 )
             ) {
                 Icon(
@@ -5516,6 +5650,8 @@ fun PantallaTallerTrabajador(
     solicitudes: List<SolicitudItem>,
     escalaTexto: Float,
     alCambiarEscalaTexto: (Float) -> Unit,
+    apariencia: String,
+    alCambiarApariencia: (String) -> Unit,
     alEditarPerfil: () -> Unit,
     alPublicarEvidencia: (String, Uri?) -> Unit,
     alClickFotoEvidencia: (EvidenciaItem) -> Unit,
@@ -5604,7 +5740,7 @@ fun PantallaTallerTrabajador(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        HabilioBadge("SERVICIO CONCLUIDO", HabilioTheme.VerdeExito, Color(0xFF0B1C16))
+                        HabilioBadge("SERVICIO CONCLUIDO", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
                         Text("Completado", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -5645,7 +5781,7 @@ fun PantallaTallerTrabajador(
                                 text = trabajador?.oficio ?: "Oficio",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = HabilioTheme.AmarilloPrimario
+                                color = HabilioTheme.AmarilloAcentoTexto
                             )
                         }
                     }
@@ -5656,9 +5792,9 @@ fun PantallaTallerTrabajador(
                         border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Editar", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 
@@ -5684,6 +5820,13 @@ fun PantallaTallerTrabajador(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            SeccionApariencia(
+                aparienciaActual = apariencia,
+                alCambiarApariencia = alCambiarApariencia
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             HabilioTarjeta(colorBorde = HabilioTheme.AmarilloPrimario.copy(alpha = 0.5f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -5691,7 +5834,7 @@ fun PantallaTallerTrabajador(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Subir foto de trabajo real", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("+ Evidencia", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = HabilioTheme.AmarilloPrimario)
+                    Text("+ Evidencia", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -5744,9 +5887,9 @@ fun PantallaTallerTrabajador(
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario)
                     ) {
-                        Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Elegir fotografía", color = HabilioTheme.AmarilloPrimario, fontWeight = FontWeight.Bold)
+                        Text("Elegir fotografía", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -5823,7 +5966,7 @@ fun PantallaTallerTrabajador(
                                             .background(HabilioTheme.SuperficieElevada),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(Icons.Outlined.Image, contentDescription = null, tint = HabilioTheme.AmarilloPrimario, modifier = Modifier.size(32.dp))
+                                        Icon(Icons.Outlined.Image, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(32.dp))
                                     }
                                 }
                                 Column(modifier = Modifier.padding(10.dp)) {
@@ -5912,7 +6055,7 @@ fun PantallaSeguimientoSolicitud(
 
                 HabilioBadge(
                     texto = "Folio $folioCorto",
-                    colorTexto = HabilioTheme.AmarilloPrimario,
+                    colorTexto = HabilioTheme.AmarilloAcentoTexto,
                     colorFondo = HabilioTheme.FondoAmarilloSuave
                 )
             }
@@ -6040,7 +6183,7 @@ fun PantallaSeguimientoSolicitud(
                     text = "📦 DETALLES DE LA SOLICITUD",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = HabilioTheme.AmarilloPrimario
+                    color = HabilioTheme.AmarilloAcentoTexto
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -6057,7 +6200,7 @@ fun PantallaSeguimientoSolicitud(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloPrimario)
+                            Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
                             if (!especialista?.telefono.isNullOrBlank()) {
                                 Text("📱 +52 ${especialista?.telefono}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                             }
@@ -6100,7 +6243,7 @@ fun PantallaSeguimientoSolicitud(
                         text = "$${String.format("%.2f", solicitud.monto)} MXN",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = HabilioTheme.AmarilloPrimario
+                        color = HabilioTheme.AmarilloAcentoTexto
                     )
                 }
             }

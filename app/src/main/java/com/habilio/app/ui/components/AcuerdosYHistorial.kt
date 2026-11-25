@@ -1,5 +1,6 @@
 package com.habilio.app
 
+import androidx.compose.foundation.selection.selectable
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -49,6 +50,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +89,8 @@ fun TituloSeccion(texto: String, icono: ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)) {
         Icon(icono, contentDescription = null, tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(texto, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = HabilioTheme.TextoPrimario)
+        Text(texto, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = HabilioTheme.TextoPrimario,
+            modifier = Modifier.semantics { heading() })
     }
 }
 
@@ -94,10 +98,12 @@ fun TituloSeccion(texto: String, icono: ImageVector) {
 fun OpcionRadio(texto: String, seleccionada: Boolean, alElegir: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(44.dp)).clickable { alElegir() }
+        // Acta #22: toda la fila es una sola opción para el lector de pantalla ("botón de opción, seleccionado")
+        modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp))
+            .selectable(selected = seleccionada, onClick = alElegir, role = Role.RadioButton)
     ) {
         RadioButton(
-            selected = seleccionada, onClick = alElegir,
+            selected = seleccionada, onClick = null,
             colors = RadioButtonDefaults.colors(selectedColor = HabilioTheme.AmarilloAcentoTexto)
         )
         Text(texto, fontSize = 14.sp, color = HabilioTheme.TextoPrimario, modifier = Modifier.padding(start = 4.dp))

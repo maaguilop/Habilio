@@ -212,6 +212,11 @@ fun PantallaPerfilCliente(
 
             TarjetaSeguridadPerfil(totalBloqueados = totalBloqueados, alAbrirCentro = alAbrirSeguridad)
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Acta #23: mediciones de rendimiento de este teléfono
+            TarjetaDiagnostico()
+
             Spacer(modifier = Modifier.height(16.dp))
 
             HabilioTarjeta {

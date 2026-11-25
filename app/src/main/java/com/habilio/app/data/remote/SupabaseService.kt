@@ -92,13 +92,82 @@ object SupabaseService {
 
     private var tokenSesionActual: String? = null
 
+    /**
+     * Acta #23: tope de filas por consulta de listas (especialistas; portafolio y reseñas usan 4 veces este valor).
+     * Evita descargar la base completa cuando crezca; la pantalla además muestra los resultados por páginas.
+     */
+    private const val LIMITE_LISTAS = 200
+
+    // Acta #20/#21: la sesión vive solo en memoria (no se guarda en disco ni entra a respaldos). Supabase entrega un
+    // token de acceso que caduca (normalmente en 1 hora) y un token de renovación. Con RLS activo, cada consulta
+    // depende de ese token, así que se renueva solo antes de caducar.
+    private var tokenRenovacion: String? = null
+    private var tokenCaducaEn: Long = 0L
+
+    private fun guardarSesion(json: JSONObject) {
+        tokenSesionActual = json.optString("access_token", "").ifBlank { null }
+        tokenRenovacion = json.optString("refresh_token", "").ifBlank { null }
+        val segundos = json.optLong("expires_in", 3600L).coerceAtLeast(60L)
+        tokenCaducaEn = System.currentTimeMillis() + segundos * 1000L
+    }
+
+    /** Renueva el token de acceso con el de renovación. Devuelve false si ya no es posible (hay que iniciar sesión). */
+    @Synchronized
+    private fun renovarSesion(): Boolean {
+        val refresh = tokenRenovacion ?: return false
+        return try {
+            val conn = (URL("$AUTH_URL/token?grant_type=refresh_token").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000
+                readTimeout = 15000
+                setRequestProperty("apikey", ANON_KEY)
+                setRequestProperty("Content-Type", "application/json")
+                doOutput = true
+            }
+            conn.outputStream.use { it.write(JSONObject().put("refresh_token", refresh).toString().toByteArray(Charsets.UTF_8)) }
+            if (conn.responseCode in 200..299) {
+                val cuerpo = conn.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText)
+                guardarSesion(JSONObject(cuerpo))
+                true
+            } else {
+                tokenSesionActual = null
+                tokenRenovacion = null
+                false
+            }
+        } catch (_: java.io.IOException) {
+            false
+        }
+    }
+
+    /** Si el token está por caducar (menos de 1 minuto), lo renueva antes de hacer la petición. */
+    private fun asegurarSesionVigente() {
+        if (tokenSesionActual != null && System.currentTimeMillis() > tokenCaducaEn - 60_000L) renovarSesion()
+    }
+
     /** Se llama una vez al abrir la app: prepara la copia local que permite ver datos sin conexión. */
     fun inicializar(context: Context) {
         CacheLocal.iniciar(context)
     }
 
     fun cerrarSesionToken() {
+        val tokenAnterior = tokenSesionActual
         tokenSesionActual = null
+        tokenRenovacion = null
+        tokenCaducaEn = 0L
+        // Revoca la sesión también en el servidor (en segundo plano; si no hay red, caduca sola).
+        if (tokenAnterior != null) {
+            Thread {
+                try {
+                    (URL("$AUTH_URL/logout").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 8000
+                        readTimeout = 8000
+                        setRequestProperty("apikey", ANON_KEY)
+                        setRequestProperty("Authorization", "Bearer $tokenAnterior")
+                    }.responseCode
+                } catch (_: Exception) { }
+            }.start()
+        }
         // Acta #24/#25: al cerrar sesión no queda en el teléfono información de la cuenta (solicitudes, direcciones)
         CacheLocal.borrarDatosPrivados()
     }
@@ -202,9 +271,13 @@ object SupabaseService {
         try {
             val bytesComprimidos = comprimirImagenJpeg(context, uri) ?: return@withContext null
 
-            val nombreArchivo = "${nombre ?: UUID.randomUUID().toString()}.jpg"
+            asegurarSesionVigente()
+            // Acta #21: sin sesión (foto de perfil durante el registro) solo se permite subir a la carpeta "registro/".
+            val carpeta = if (tokenSesionActual == null) "registro/" else ""
+            val nombreArchivo = "$carpeta${nombre ?: UUID.randomUUID().toString()}.jpg"
             val urlStorage = "$PROJECT_URL/storage/v1/object/evidencias/$nombreArchivo"
             val bearer = tokenSesionActual ?: ANON_KEY
+            val inicioSubida = System.nanoTime()
 
             val conn = (URL(urlStorage).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -221,6 +294,8 @@ object SupabaseService {
 
             val codigo = conn.responseCode
             val urlPublica = "$PROJECT_URL/storage/v1/object/public/evidencias/$nombreArchivo"
+            // Acta #9/#23: velocidad real de subida (tiempo y KB/s)
+            MetricasRendimiento.registrarSubida(bytesComprimidos.size.toLong(), (System.nanoTime() - inicioSubida) / 1_000_000L, codigo in 200..299)
             if (codigo in 200..299) {
                 urlPublica
             } else {
@@ -301,6 +376,22 @@ object SupabaseService {
         cuerpoJson: String? = null,
         preferReturn: Boolean = true
     ): Pair<Int, String> {
+        if (!urlCompleta.startsWith(AUTH_URL)) asegurarSesionVigente()
+        val r = ejecutarPeticion(urlCompleta, metodo, cuerpoJson, preferReturn)
+        // Token caducado o revocado: se renueva una vez y se repite la petición.
+        if (r.first == 401 && tokenRenovacion != null && !urlCompleta.startsWith(AUTH_URL) && renovarSesion()) {
+            return ejecutarPeticion(urlCompleta, metodo, cuerpoJson, preferReturn)
+        }
+        return r
+    }
+
+    private fun ejecutarPeticion(
+        urlCompleta: String,
+        metodo: String,
+        cuerpoJson: String?,
+        preferReturn: Boolean
+    ): Pair<Int, String> {
+        val inicio = System.nanoTime()
         val bearer = tokenSesionActual ?: ANON_KEY
         val conn = (URL(urlCompleta).openConnection() as HttpURLConnection).apply {
             requestMethod = metodo
@@ -318,6 +409,8 @@ object SupabaseService {
         val codigo = conn.responseCode
         val stream = if (codigo in 200..299) conn.inputStream else conn.errorStream
         val respuesta = stream?.bufferedReader(Charsets.UTF_8)?.use(BufferedReader::readText) ?: ""
+        // Acta #23: tiempo de respuesta de cada consulta
+        MetricasRendimiento.registrarPeticion(urlCompleta, metodo, (System.nanoTime() - inicio) / 1_000_000L, respuesta.length, codigo)
         return codigo to respuesta
     }
 
@@ -415,7 +508,7 @@ object SupabaseService {
             var userId = ""
             if (authCode in 200..299 && authResp.isNotBlank()) {
                 val jsonAuth = JSONObject(authResp)
-                tokenSesionActual = jsonAuth.optString("access_token", "").ifBlank { null }
+                guardarSesion(jsonAuth)
                 userId = jsonAuth.optJSONObject("user")?.optString("id").orEmpty()
                     .ifBlank { jsonAuth.optString("id", "") }
             } else {
@@ -427,7 +520,7 @@ object SupabaseService {
                 )
                 if (loginCode in 200..299 && loginResp.isNotBlank()) {
                     val jsonLogin = JSONObject(loginResp)
-                    tokenSesionActual = jsonLogin.optString("access_token", "").ifBlank { null }
+                    guardarSesion(jsonLogin)
                     userId = jsonLogin.optJSONObject("user")?.optString("id").orEmpty()
                 } else {
                     return@withContext Result.failure(
@@ -589,7 +682,16 @@ object SupabaseService {
                 } else {
                     "telefono=eq.${URLEncoder.encode(limpio.filter { it.isDigit() }, "UTF-8")}"
                 }
-                val (codeBusqueda, respBusqueda) = peticionHttp("$REST_URL/perfiles?$filtro&select=*")
+                // Acta #21: con RLS activo nadie puede leer perfiles ajenos antes de iniciar sesión. Para poder entrar
+                // con el teléfono, la función segura `correo_para_login` devuelve SOLO el correo de acceso.
+                val (codeRpc, respRpc) = peticionHttp(
+                    "$REST_URL/rpc/correo_para_login", "POST",
+                    JSONObject().put("p_identificador", limpio).toString(), false
+                )
+                val correoRpc = if (codeRpc in 200..299) respRpc.trim().trim('"') else ""
+                if (correoRpc.contains("@")) correoParaAuth = correoRpc.lowercase()
+                val (codeBusqueda, respBusqueda) = if (correoRpc.contains("@")) (0 to "")
+                    else peticionHttp("$REST_URL/perfiles?$filtro&select=*")
                 if (codeBusqueda in 200..299 && respBusqueda.isNotBlank()) {
                     val arr = JSONArray(respBusqueda)
                     if (arr.length() > 0) {
@@ -636,7 +738,7 @@ object SupabaseService {
                 }
 
                 val jsonAuth = JSONObject(authResp)
-                tokenSesionActual = jsonAuth.optString("access_token", "").ifBlank { null }
+                guardarSesion(jsonAuth)
                 val uid = jsonAuth.optJSONObject("user")?.optString("id").orEmpty()
 
                 if (uid.isNotBlank()) {
@@ -665,10 +767,10 @@ object SupabaseService {
             // no existe en la base, la tabla de perfiles descartando esos datos. El teléfono se pide aparte y solo
             // cuando el servicio ya fue aceptado (ver obtenerTelefonoParaServicio).
             val deVista = try {
-                getConCache("$REST_URL/perfiles_publicos?order=creado_en.desc")
+                getConCache("$REST_URL/perfiles_publicos?order=creado_en.desc&limit=$LIMITE_LISTAS")
             } catch (_: java.io.IOException) { null }
             val (code, resp) = if (deVista != null && deVista.first in 200..299) deVista
-                else getConCache("$REST_URL/perfiles?rol=eq.trabajador&order=creado_en.desc")
+                else getConCache("$REST_URL/perfiles?rol=eq.trabajador&order=creado_en.desc&limit=$LIMITE_LISTAS")
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
                 return@withContext List(arr.length()) { i ->
@@ -681,7 +783,7 @@ object SupabaseService {
 
     suspend fun obtenerEvidencias(): List<EvidenciaItem> = withContext(Dispatchers.IO) {
         try {
-            val (code, resp) = getConCache("$REST_URL/evidencias?order=creado_en.desc")
+            val (code, resp) = getConCache("$REST_URL/evidencias?order=creado_en.desc&limit=${LIMITE_LISTAS * 4}")
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
                 return@withContext List(arr.length()) { i ->
@@ -800,7 +902,7 @@ object SupabaseService {
             val query = if (trabajadorId != null) {
                 "$REST_URL/resenas?trabajador_id=eq.$trabajadorId&order=creado_en.desc"
             } else {
-                "$REST_URL/resenas?order=creado_en.desc"
+                "$REST_URL/resenas?order=creado_en.desc&limit=${LIMITE_LISTAS * 4}"
             }
             val (code, resp) = getConCache(query)
             if (code in 200..299 && resp.isNotBlank()) {
@@ -1009,7 +1111,17 @@ object SupabaseService {
             try {
                 val campoFiltro = if (esTrabajador) "trabajador_id" else "cliente_id"
                 val (code, resp) = getConCache("$REST_URL/solicitudes?$campoFiltro=eq.$usuarioId&order=creado_en.desc", privado = true)
-                val (codePerfiles, respPerfiles) = getConCache("$REST_URL/perfiles?select=id,nombre,oficio")
+                // Acta #21: nombres de las personas con quienes hay solicitudes, sin leer perfiles completos ajenos
+                val (codeRpcNombres, respRpcNombres) = try {
+                    peticionHttp("$REST_URL/rpc/nombres_contrapartes", "POST", "{}", false)
+                } catch (_: java.io.IOException) { 0 to "" }
+                val (codePerfiles, respPerfiles) = if (codeRpcNombres in 200..299 && respRpcNombres.trim().startsWith("[")) {
+                    CacheLocal.guardar("$REST_URL/rpc/nombres_contrapartes#$usuarioId", respRpcNombres, true)
+                    codeRpcNombres to respRpcNombres
+                } else {
+                    CacheLocal.leer("$REST_URL/rpc/nombres_contrapartes#$usuarioId", true)?.let { 200 to it }
+                        ?: getConCache("$REST_URL/perfiles?select=id,nombre,oficio")
+                }
 
                 val mapaNombres = mutableMapOf<String, Pair<String, String>>()
                 if (codePerfiles in 200..299 && respPerfiles.isNotBlank()) {

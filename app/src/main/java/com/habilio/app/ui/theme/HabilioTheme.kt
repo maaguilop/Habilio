@@ -107,12 +107,18 @@ object HabilioTheme {
     val SuperficieInput get() = c(0xFF121418, 0xFFF7F3EC)
     val SuperficieElevada get() = c(0xFF22262E, 0xFFF0EAE0)
     val BordeTarjeta get() = c(0xFF2A2F3A, 0xFFE8E2D9)
-    /** Borde de campos de texto: un poco más marcado en claro para que el campo se distinga. */
-    val BordeInput get() = c(0xFF2A2F3A, 0xFFB8AD9C)
+    /**
+     * Borde de campos de texto y casillas. Acta #22: debe contrastar al menos 3:1 con la superficie (WCAG 1.4.11)
+     * para que se note dónde escribir: 3.7:1 en oscuro y 3.7:1 en claro (antes 1.4:1 y 2.0:1).
+     */
+    val BordeInput get() = c(0xFF667085, 0xFF857D74)
 
     val AmarilloPrimario get() = c(0xFFF5B811, 0xFFF59E0B)
-    /** Amarillo para texto, estrellas, iconos y enlaces (más oscuro en claro para contraste: 5.0:1). */
-    val AmarilloAcentoTexto get() = c(0xFFF5B811, 0xFFB45309)
+    /**
+     * Amarillo para texto, estrellas, iconos y enlaces. Acta #22: en claro se oscureció un poco (antes #B45309)
+     * para pasar 4.5:1 también sobre la superficie elevada (5.1:1; 6.1:1 sobre blanco).
+     */
+    val AmarilloAcentoTexto get() = c(0xFFF5B811, 0xFFA14808)
     val FondoAmarilloSuave get() = c(0xFF332910, 0xFFFEF3C7)
     val TextoSobreAmarillo get() = Color(0xFF111315)
 

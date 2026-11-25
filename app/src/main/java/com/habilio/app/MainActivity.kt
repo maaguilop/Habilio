@@ -86,6 +86,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Acta #24: prepara la copia local para ver datos sin conexión
         SupabaseService.inicializar(applicationContext)
+        // Acta #23: caché de imágenes explícita. Las fotos se cargan de forma diferida (solo las visibles) y se
+        // guardan en memoria (20 % de la disponible) y en disco (hasta 60 MB) para no descargarlas de nuevo
+        // y poder verlas sin conexión.
+        coil.Coil.setImageLoader(
+            coil.ImageLoader.Builder(applicationContext)
+                .memoryCache { coil.memory.MemoryCache.Builder(applicationContext).maxSizePercent(0.20).build() }
+                .diskCache {
+                    coil.disk.DiskCache.Builder()
+                        .directory(applicationContext.cacheDir.resolve("imagenes_habilio"))
+                        .maxSizeBytes(60L * 1024 * 1024)
+                        .build()
+                }
+                .respectCacheHeaders(false)
+                .crossfade(true)
+                .build()
+        )
 
         // Barras del sistema acordes a la preferencia guardada desde el primer frame (evita el "parpadeo" oscuro)
         val prefs = getSharedPreferences(AppConfig.PREFS_NAME, Context.MODE_PRIVATE)
@@ -103,5 +119,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             HabilioApp()
         }
+
+        // Acta #23: tiempo de arranque (proceso creado -> primer cuadro dibujado) y monitor de fluidez
+        window.decorView.post {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                MetricasRendimiento.registrarArranque(
+                    android.os.SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis()
+                )
+            }
+            reportFullyDrawn()
+        }
+        MetricasRendimiento.iniciarMonitorFluidez(this)
+    }
+
+    override fun onDestroy() {
+        MetricasRendimiento.detenerMonitorFluidez(this)
+        super.onDestroy()
     }
 }

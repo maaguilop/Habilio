@@ -156,13 +156,18 @@ fun PantallaInicioRol(
             Spacer(modifier = Modifier.height(16.dp))
 
             TarjetaSeleccionRol(
-                titulo = "Trabajador",
+                titulo = "Especialista",
                 descripcion = "Responder preguntas sencillas, subir fotos de mis trabajos y recibir clientes.",
                 icono = Icons.Default.Build,
                 colorIcono = HabilioTheme.AzulVerificado,
                 colorFondoIcono = HabilioTheme.FondoAzulSuave,
                 alClick = alElegirTrabajador
             )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Acta #26: representación visual de mujeres en oficios tradicionalmente masculinizados
+            SeccionMujeresEnOficios()
         }
     }
 }

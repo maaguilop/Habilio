@@ -506,16 +506,23 @@ fun PantallaBuscadorCliente(
             }
 
             if (!cargando) {
-                resultados.forEach { esp ->
+                // Acta #23: paginación de resultados. Solo se dibujan (y cargan sus fotos) los primeros
+                // TAMANO_PAGINA; "Ver más" agrega la siguiente página. Al cambiar un filtro se vuelve a la primera.
+                var paginasVisibles by remember(resultados) { mutableIntStateOf(1) }
+                val evidenciasPorTrabajador = remember(evidencias) { evidencias.groupBy { it.trabajadorId } }
+                val resenasPorPersona = remember(resenas) { resenas.groupingBy { it.trabajadorId }.eachCount() }
+                val visibles = resultados.take(paginasVisibles * TAMANO_PAGINA)
+                visibles.forEach { esp ->
                     TarjetaEspecialistaBuscador(
                         especialista = esp,
-                        evidencias = evidencias.filter { it.trabajadorId == esp.id },
-                        cantidadResenas = resenas.count { it.trabajadorId == esp.id },
+                        evidencias = evidenciasPorTrabajador[esp.id].orEmpty(),
+                        cantidadResenas = resenasPorPersona[esp.id] ?: 0,
                         alClickFotoEvidencia = alClickFotoEvidencia,
                         alVerDetalle = { alVerEspecialista(esp) }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                 }
+                BotonVerMas(mostrados = visibles.size, total = resultados.size, alClick = { paginasVisibles++ })
             }
         }
     }

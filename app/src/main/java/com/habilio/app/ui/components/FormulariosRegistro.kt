@@ -142,7 +142,7 @@ fun SelectorEdadTrabajador(
 ) {
     val opciones = listOf(
         Triple(RangoEdad.MAYOR, "Tengo 18 años o más", "Puedes elegir cualquier oficio."),
-        Triple(RangoEdad.MENOR_15_17, "Tengo entre 15 y 17 años", "Solo oficios sin riesgo y con autorización de tu madre, padre o tutor."),
+        Triple(RangoEdad.MENOR_15_17, "Tengo entre 15 y 17 años", "Solo oficios sin riesgo y con autorización de tu madre, padre o persona tutora."),
         Triple(RangoEdad.MENOR_15, "Tengo menos de 15 años", "Por ley todavía no puedes trabajar ni registrarte.")
     )
 
@@ -322,9 +322,9 @@ fun CheckDeclaracionEdadYPrivacidad(
     var mostrarAvisoCompleto by remember { mutableStateOf(false) }
 
     val detalleRol = if (esTrabajador) {
-        "Tus datos de contacto, ubicación de taller y fotografías de portafolio serán visibles para clientes dentro de Habilio."
+        "Tu nombre, oficio, zona general y fotografías de portafolio serán visibles en Habilio. Tu teléfono solo se comparte con quien te contrate, después de que aceptes el servicio; tu correo y dirección nunca se muestran."
     } else {
-        "Tus datos de contacto se utilizarán únicamente dentro de Habilio para coordinar solicitudes de servicio en tu comunidad."
+        "Tus datos de contacto se usan solo dentro de Habilio. La persona especialista ve la zona general del trabajo; tu dirección exacta se comparte solo después de que acepte y si tú lo permites."
     }
 
     HabilioTarjeta(
@@ -426,7 +426,7 @@ fun ModalAvisoPrivacidad(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = if (esTrabajador) {
-                    "Al crear una cuenta de trabajador declaras bajo protesta de decir verdad la edad que indicaste. Con 18 años o más puedes ejercer cualquier oficio. De 15 a 17 años solo puedes ejercer oficios que no sean de riesgo (no Albañilería, Herrería ni Electricidad) y con autorización de tu madre, padre o tutor. Menores de 15 años no pueden registrarse. Guardamos la fecha y hora en que aceptas este aviso."
+                    "Al crear una cuenta de especialista declaras bajo protesta de decir verdad la edad que indicaste. Con 18 años o más puedes ejercer cualquier oficio. De 15 a 17 años solo puedes ejercer oficios que no sean de riesgo (no Albañilería, Herrería ni Electricidad) y con autorización de tu madre, padre o persona tutora. Menores de 15 años no pueden registrarse. Guardamos la fecha y hora en que aceptas este aviso."
                 } else {
                     "Al crear una cuenta de cliente declaras bajo protesta de decir verdad que tienes al menos 18 años cumplidos y cuentas con capacidad legal para contratar servicios de oficio. Guardamos la fecha y hora en que aceptas este aviso."
                 },

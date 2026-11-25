@@ -197,7 +197,7 @@ fun PantallaLoginUnificada(
             val textoBoton = if (cargando) {
                 "Verificando credenciales..."
             } else if (esModoTrabajador) {
-                "Continuar como trabajador"
+                "Continuar como especialista"
             } else {
                 "Continuar como Cliente"
             }
@@ -272,7 +272,7 @@ fun TarjetaCambioATrabajador(alClick: () -> Unit) {
                     contentColor = HabilioTheme.TextoPrimario
                 )
             ) {
-                Text("Ingresar como Trabajador", fontWeight = FontWeight.SemiBold)
+                Text("Ingresar como Especialista", fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.width(6.dp))
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
             }

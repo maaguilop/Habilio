@@ -1,5 +1,6 @@
 package com.habilio.app
 
+import androidx.compose.foundation.selection.toggleable
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -257,9 +258,10 @@ fun ModalSolicitarServicio(
                 Spacer(Modifier.height(8.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp)).clickable { esUrgente = !esUrgente }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                        .toggleable(value = esUrgente, onValueChange = { esUrgente = it }, role = Role.Checkbox)
                 ) {
-                    Checkbox(checked = esUrgente, onCheckedChange = { esUrgente = it },
+                    Checkbox(checked = esUrgente, onCheckedChange = null,
                         colors = CheckboxDefaults.colors(checkedColor = HabilioTheme.AmarilloPrimario, checkmarkColor = HabilioTheme.TextoSobreAmarillo))
                     Text("Es urgente (hoy o mañana)", fontSize = 14.sp, color = HabilioTheme.TextoPrimario)
                 }
@@ -327,9 +329,10 @@ fun ModalSolicitarServicio(
                 Spacer(Modifier.height(10.dp))
                 Row(
                     verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !enviando) { confirmo = !confirmo }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                        .toggleable(value = confirmo, enabled = !enviando, onValueChange = { confirmo = it }, role = Role.Checkbox)
                 ) {
-                    Checkbox(checked = confirmo, onCheckedChange = { confirmo = it }, enabled = !enviando,
+                    Checkbox(checked = confirmo, onCheckedChange = null, enabled = !enviando,
                         colors = CheckboxDefaults.colors(checkedColor = HabilioTheme.AmarilloPrimario, checkmarkColor = HabilioTheme.TextoSobreAmarillo))
                     Text(
                         "Confirmo que los datos son correctos y acepto compartir mi dirección y teléfono con ${trabajador.nombre} para coordinar el servicio.",

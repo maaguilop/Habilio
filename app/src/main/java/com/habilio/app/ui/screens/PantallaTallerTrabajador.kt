@@ -1,5 +1,6 @@
 package com.habilio.app
 
+import androidx.compose.foundation.selection.toggleable
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -327,6 +328,11 @@ fun PantallaTallerTrabajador(
 
             TarjetaSeguridadPerfil(totalBloqueados = totalBloqueados, alAbrirCentro = alAbrirSeguridad)
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Acta #23: mediciones de rendimiento de este teléfono
+            TarjetaDiagnostico()
+
             Spacer(modifier = Modifier.height(16.dp))
 
             if (trabajador?.autorizacionEstado == "pendiente") {
@@ -489,10 +495,12 @@ fun PantallaTallerTrabajador(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !publicando) { consentimientoImagenes = !consentimientoImagenes }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                        .toggleable(value = consentimientoImagenes, enabled = !publicando,
+                            onValueChange = { consentimientoImagenes = it }, role = Role.Checkbox)
                 ) {
                     Checkbox(
-                        checked = consentimientoImagenes, onCheckedChange = { consentimientoImagenes = it }, enabled = !publicando,
+                        checked = consentimientoImagenes, onCheckedChange = null, enabled = !publicando,
                         colors = CheckboxDefaults.colors(checkedColor = HabilioTheme.AmarilloPrimario, checkmarkColor = HabilioTheme.TextoSobreAmarillo)
                     )
                     Text(

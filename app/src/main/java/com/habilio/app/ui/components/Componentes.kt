@@ -49,6 +49,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -482,7 +484,7 @@ fun HabilioTopBar(
                             if (modoTrabajador) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 HabilioBadge(
-                                    texto = "● Modo trabajador",
+                                    texto = "● Modo especialista",
                                     colorTexto = HabilioTheme.VerdeExito,
                                     colorFondo = HabilioTheme.FondoVerdeSuave
                                 )
@@ -713,10 +715,12 @@ fun EncabezadoModal(
                 text = titulo,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = HabilioTheme.TextoPrimario
+                color = HabilioTheme.TextoPrimario,
+                // Acta #22: los lectores de pantalla lo anuncian como encabezado y permiten saltar entre secciones
+                modifier = Modifier.semantics { heading() }
             )
         }
-        IconButton(onClick = alCerrar, modifier = Modifier.size(48.dp)) {
+        IconButton(onClick = alCerrar, modifier = Modifier.size(HabilioTheme.alturaMinima(48.dp))) {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Cerrar",

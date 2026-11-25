@@ -275,7 +275,7 @@ fun PantallaDetalleEspecialista(
             EstadoCargaOVacio(
                 cargando = false,
                 estaVacio = trabajos.isEmpty(),
-                mensajeVacio = "Este trabajador aún no ha subido fotografías a su portafolio."
+                mensajeVacio = "Esta persona aún no ha subido fotografías a su portafolio."
             )
 
             trabajos.forEach { trabajo ->
@@ -308,7 +308,9 @@ fun PantallaDetalleEspecialista(
                 mensajeVacio = "Aún no hay reseñas registradas para ${especialista.nombre}."
             )
 
-            resenas.forEach { r ->
+            // Acta #23: las reseñas se muestran por páginas
+            var resenasVisibles by remember(resenas) { mutableIntStateOf(TAMANO_PAGINA_RESENAS) }
+            resenas.take(resenasVisibles).forEach { r ->
                 TarjetaResena(
                     autor = r.autorNombre,
                     comentario = "\"${r.comentario}\"",
@@ -318,6 +320,10 @@ fun PantallaDetalleEspecialista(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
             }
+            BotonVerMas(
+                mostrados = minOf(resenasVisibles, resenas.size), total = resenas.size,
+                texto = "Ver más reseñas", alClick = { resenasVisibles += TAMANO_PAGINA_RESENAS }
+            )
         }
     }
 }

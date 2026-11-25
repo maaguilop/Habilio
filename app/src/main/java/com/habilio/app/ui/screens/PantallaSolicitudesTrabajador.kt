@@ -459,7 +459,7 @@ fun TarjetaSolicitudEnEjecucion(
                 Text(
                     text = when {
                         completada -> "✓ Trabajo concluido"
-                        esperandoConfirmacion -> "⏳ Por confirmar cliente"
+                        esperandoConfirmacion -> "⏳ Por confirmar por el cliente"
                         else -> "🛠️ En proceso"
                     },
                     fontSize = 12.sp,

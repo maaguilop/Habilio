@@ -487,7 +487,7 @@ fun ModalSolicitudConfirmada(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("FOLIO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
                             Text(
                                 text = folioCorto,
@@ -499,7 +499,9 @@ fun ModalSolicitudConfirmada(
                         Column(horizontalAlignment = Alignment.End) {
                             Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "$${String.format("%.2f", solicitud.monto)} MXN",
+                                text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
+                                maxLines = 1,
+                                softWrap = false,
                                 fontSize = 16.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.ExtraBold,

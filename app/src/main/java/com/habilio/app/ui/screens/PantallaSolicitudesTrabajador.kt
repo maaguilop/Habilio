@@ -333,10 +333,11 @@ fun TarjetaSolicitudNueva(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("PRESUPUESTO ORIENTATIVO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoSecundario)
                     Text(
-                        text = "$${String.format("%.2f", solicitud.monto)} MXN",
+                        text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
+                        maxLines = 1,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
                         color = HabilioTheme.AmarilloAcentoTexto

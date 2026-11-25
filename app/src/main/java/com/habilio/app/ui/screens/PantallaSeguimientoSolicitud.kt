@@ -333,22 +333,32 @@ fun PantallaSeguimientoSolicitud(
                 HorizontalDivider(color = HabilioTheme.BordeTarjeta)
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Etiqueta y monto en una línea; la explicación abajo a todo lo ancho
+                // (antes el texto largo dejaba al monto sin espacio y se partía en vertical)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
-                        Text("Monto orientativo. El monto final se acuerda en la sección de presupuesto y se paga directamente a la persona especialista (Habilio no procesa pagos).", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
-                    }
                     Text(
-                        text = "$${String.format("%.2f", solicitud.monto)} MXN",
+                        "MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = HabilioTheme.AmarilloAcentoTexto
+                        color = HabilioTheme.AmarilloAcentoTexto,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "El monto final se acuerda en la sección de presupuesto y se paga directamente a la persona especialista (Habilio no procesa pagos).",
+                    fontSize = 12.sp, lineHeight = 17.sp, color = HabilioTheme.TextoSecundario
+                )
             }
 
             if (solicitud.fotosProblema.isNotEmpty()) {

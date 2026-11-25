@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -109,6 +110,8 @@ fun PantallaBuscadorCliente(
     var precioMaximo by remember { mutableIntStateOf(0) }
     // Acta #1: sección voluntaria; no se pide ni se guarda el género de nadie
     var soloMujeresEnOficios by remember { mutableStateOf(false) }
+    // Filtros secundarios ocultos al inicio para que la pantalla no se vea saturada
+    var mostrarMasFiltros by rememberSaveable { mutableStateOf(false) }
 
     val categorias = listOf("Todos") + CATALOGO_OFICIOS.map { it.nombre }
 
@@ -206,7 +209,7 @@ fun PantallaBuscadorCliente(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("FILTRAR POR ZONA DE SERVICIO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoSecundario)
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = HabilioTheme.RojoUrgente, modifier = Modifier.size(18.dp))
@@ -291,6 +294,57 @@ fun PantallaBuscadorCliente(
                 }
             }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Cuántos filtros secundarios están activos (se muestra en el botón aunque estén ocultos)
+            val filtrosSecundariosActivos = listOf(
+                dispActivas.isNotEmpty(), expMinima > 0, precioMaximo > 0,
+                soloMujeresEnOficios, orden != OrdenResultados.RECIENTES
+            ).count { it }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { mostrarMasFiltros = !mostrarMasFiltros },
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, if (filtrosSecundariosActivos > 0) HabilioTheme.AzulIcono else HabilioTheme.BordeInput),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = HabilioTheme.TextoPrimario, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = when {
+                            mostrarMasFiltros -> "Menos filtros"
+                            filtrosSecundariosActivos > 0 -> "Más filtros ($filtrosSecundariosActivos activos)"
+                            else -> "Más filtros"
+                        },
+                        color = HabilioTheme.TextoPrimario,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        if (mostrarMasFiltros) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (mostrarMasFiltros) "Ocultar filtros" else "Mostrar más filtros",
+                        tint = HabilioTheme.TextoSecundario
+                    )
+                }
+                if (filtrosSecundariosActivos > 0) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    TextButton(
+                        onClick = {
+                            dispActivas = emptySet(); expMinima = 0; precioMaximo = 0
+                            soloMujeresEnOficios = false; orden = OrdenResultados.RECIENTES
+                        },
+                        modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                    ) { Text("Quitar", color = HabilioTheme.AzulVerificado, fontWeight = FontWeight.Bold) }
+                }
+            }
+
+            if (mostrarMasFiltros) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text("DISPONIBILIDAD", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoSecundario)
@@ -424,6 +478,7 @@ fun PantallaBuscadorCliente(
                     )
                 }
             }
+            } // fin de "Más filtros"
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -539,6 +594,9 @@ fun TarjetaEspecialistaBuscador(
     val tieneEvidenciaComprobable = evidencias.isNotEmpty()
     val trabajos = remember(evidencias) { agruparEvidencias(evidencias) }
 
+    // Con letra grande, la columna de la derecha (insignia y estrellas) le quitaba casi todo el ancho
+    // a los datos del perfil y el texto se partía letra por letra. Ahora los datos usan todo el ancho
+    // y la calificación y la insignia van debajo.
     HabilioTarjeta {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             AvatarUsuario(mostrarPuntoDisponible = false, fotoUrl = especialista.fotoUrl)
@@ -546,7 +604,10 @@ fun TarjetaEspecialistaBuscador(
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(especialista.nombre, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        especialista.nombre, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                     if (tieneEvidenciaComprobable) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Icon(
@@ -572,30 +633,29 @@ fun TarjetaEspecialistaBuscador(
                     Text("Mujeres en oficios", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AmarilloAcentoTexto)
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-            Column(horizontalAlignment = Alignment.End) {
-                if (tieneEvidenciaComprobable) {
-                    HabilioBadge(
-                        texto = "TRABAJOS PUBLICADOS",
-                        colorTexto = HabilioTheme.AmarilloAcentoTexto,
-                        colorFondo = HabilioTheme.FondoAmarilloSuave
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("★", color = HabilioTheme.AmarilloAcentoTexto, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.width(3.dp))
-                    if (cantidadResenas > 0) {
-                        Text(String.format("%.1f", especialista.calificacion), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text("($cantidadResenas)", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
-                    } else {
-                        Text("Sin reseñas", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
-                    }
-                }
+        // Calificación e insignia debajo de los datos, a todo lo ancho
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("★", color = HabilioTheme.AmarilloAcentoTexto, fontSize = 14.sp)
+            Spacer(modifier = Modifier.width(3.dp))
+            if (cantidadResenas > 0) {
+                Text(String.format("%.1f", especialista.calificacion), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.width(2.dp))
+                Text("($cantidadResenas ${if (cantidadResenas == 1) "reseña" else "reseñas"})", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+            } else {
+                Text("Sin reseñas", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
             }
+        }
+        if (tieneEvidenciaComprobable) {
+            Spacer(modifier = Modifier.height(6.dp))
+            HabilioBadge(
+                texto = "TRABAJOS PUBLICADOS",
+                colorTexto = HabilioTheme.AmarilloAcentoTexto,
+                colorFondo = HabilioTheme.FondoAmarilloSuave
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -623,30 +683,28 @@ fun TarjetaEspecialistaBuscador(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // Modalidad arriba y botón a todo lo ancho: con letra grande ya no compiten por espacio
+        if (especialista.modalidad.isNotBlank()) {
             Text(
                 text = "✓ ${especialista.modalidad}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = HabilioTheme.TextoSecundario,
-                modifier = Modifier.weight(1f)
+                color = HabilioTheme.TextoSecundario
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = alVerDetalle,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = HabilioTheme.AmarilloPrimario,
-                    contentColor = HabilioTheme.TextoSobreAmarillo
-                ),
-                modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))
-            ) {
-                Text("Ver especialista", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
-            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        Button(
+            onClick = alVerDetalle,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = HabilioTheme.AmarilloPrimario,
+                contentColor = HabilioTheme.TextoSobreAmarillo
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = HabilioTheme.alturaMinima(48.dp))
+        ) {
+            Text("Ver especialista", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
         }
     }
 }

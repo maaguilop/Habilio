@@ -136,28 +136,27 @@ fun PantallaSeguimientoSolicitud(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = alVolver, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = null,
-                        tint = HabilioTheme.TextoPrimario,
-                        modifier = Modifier.size(18.dp)
+            FilaAdaptable(
+                inicio = {
+                    TextButton(onClick = alVolver, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            tint = HabilioTheme.TextoPrimario,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Volver a Mi Perfil", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
+                    }
+                },
+                fin = {
+                    HabilioBadge(
+                        texto = "Folio $folioCorto",
+                        colorTexto = HabilioTheme.AmarilloAcentoTexto,
+                        colorFondo = HabilioTheme.FondoAmarilloSuave
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Volver a Mi Perfil", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
                 }
-
-                HabilioBadge(
-                    texto = "Folio $folioCorto",
-                    colorTexto = HabilioTheme.AmarilloAcentoTexto,
-                    colorFondo = HabilioTheme.FondoAmarilloSuave
-                )
-            }
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -286,34 +285,33 @@ fun PantallaSeguimientoSolicitud(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        AvatarUsuario(
-                            tamano = 48.dp,
-                            fotoUrl = especialista?.fotoUrl
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
-                            if (puedeVerContacto(solicitud.estado)) {
-                                if (telefonoServicio.isNotBlank()) {
-                                    Text("📱 +52 $telefonoServicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                FilaAdaptable(
+                    inicio = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AvatarUsuario(
+                                tamano = 48.dp,
+                                fotoUrl = especialista?.fotoUrl
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
+                                if (puedeVerContacto(solicitud.estado)) {
+                                    if (telefonoServicio.isNotBlank()) {
+                                        Text("📱 +52 $telefonoServicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                                    }
+                                } else {
+                                    Text("🔒 El teléfono se muestra cuando se acepta el servicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                                 }
-                            } else {
-                                Text("🔒 El teléfono se muestra cuando se acepta el servicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                             }
                         }
+                    },
+                    fin = {
+                        TextButton(onClick = alVerPerfilTrabajador) {
+                            Text("Ver perfil >", color = HabilioTheme.AzulVerificado, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
                     }
-
-                    TextButton(onClick = alVerPerfilTrabajador) {
-                        Text("Ver perfil >", color = HabilioTheme.AzulVerificado, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
                 HorizontalDivider(color = HabilioTheme.BordeTarjeta)
@@ -335,25 +333,25 @@ fun PantallaSeguimientoSolicitud(
 
                 // Etiqueta y monto en una línea; la explicación abajo a todo lo ancho
                 // (antes el texto largo dejaba al monto sin espacio y se partía en vertical)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario,
-                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = HabilioTheme.AmarilloAcentoTexto,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
+                FilaAdaptable(
+                    proporcionMaximaFin = 0.6f,
+                    inicio = {
+                        Text(
+                            "MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    fin = {
+                        Text(
+                            text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = HabilioTheme.AmarilloAcentoTexto,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "El monto final se acuerda en la sección de presupuesto y se paga directamente a la persona especialista (Habilio no procesa pagos).",
@@ -490,7 +488,7 @@ fun PasoRastreoPedido(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        Column(modifier = Modifier.padding(bottom = if (mostrarLineaInferior) 18.dp else 0.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(bottom = if (mostrarLineaInferior) 18.dp else 0.dp)) {
             Text(
                 text = titulo,
                 fontWeight = FontWeight.Bold,

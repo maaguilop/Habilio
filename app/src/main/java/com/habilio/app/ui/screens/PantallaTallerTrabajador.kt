@@ -234,14 +234,14 @@ fun PantallaTallerTrabajador(
                     colorFondo = HabilioTheme.FondoVerdeSuave,
                     colorBorde = HabilioTheme.VerdeExito.copy(alpha = 0.6f)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        HabilioBadge("SERVICIO CONCLUIDO", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
-                        Text("Completado", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
-                    }
+                    FilaAdaptable(
+                        inicio = {
+                            HabilioBadge("SERVICIO CONCLUIDO", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
+                        },
+                        fin = {
+                            Text("Completado", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                        }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "${ultimoTrabajoConcluido.descripcion} • Cliente ${ultimoTrabajoConcluido.nombreCliente}",
@@ -261,41 +261,40 @@ fun PantallaTallerTrabajador(
             }
 
             HabilioTarjeta {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        AvatarUsuario(
-                            tamano = 56.dp,
-                            icono = Icons.Default.Person,
-                            colorIcono = HabilioTheme.TextoPrimario,
-                            fotoUrl = trabajador?.fotoUrl
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(trabajador?.nombre ?: "Especialista Habilio", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                            Text(
-                                text = trabajador?.oficio ?: "Oficio",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = HabilioTheme.AmarilloAcentoTexto
+                FilaAdaptable(
+                    inicio = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AvatarUsuario(
+                                tamano = 56.dp,
+                                icono = Icons.Default.Person,
+                                colorIcono = HabilioTheme.TextoPrimario,
+                                fotoUrl = trabajador?.fotoUrl
                             )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(trabajador?.nombre ?: "Especialista Habilio", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                                Text(
+                                    text = trabajador?.oficio ?: "Oficio",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = HabilioTheme.AmarilloAcentoTexto
+                                )
+                            }
+                        }
+                    },
+                    fin = {
+                        OutlinedButton(
+                            onClick = alEditarPerfil,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
-
-                    OutlinedButton(
-                        onClick = alEditarPerfil,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -351,14 +350,14 @@ fun PantallaTallerTrabajador(
             }
 
             HabilioTarjeta(colorBorde = HabilioTheme.AmarilloPrimario.copy(alpha = 0.5f)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Publicar un trabajo", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("+ Evidencia", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
-                }
+                FilaAdaptable(
+                    inicio = {
+                        Text("Publicar un trabajo", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    },
+                    fin = {
+                        Text("+ Evidencia", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
+                    }
+                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 

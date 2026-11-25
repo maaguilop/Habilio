@@ -87,9 +87,12 @@ fun SelectorZonaHabilio(
     zonaActual: String,
     alElegirZona: (String) -> Unit
 ) {
-    ZONAS_HABILIO.chunked(2).forEach { fila ->
+    val columnasZona = if (LocalDensity.current.fontScale > 1.3f) 1 else 2
+    ZONAS_HABILIO.chunked(columnasZona).forEach { fila ->
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             fila.forEach { zona ->
@@ -104,6 +107,7 @@ fun SelectorZonaHabilio(
                     ),
                     modifier = Modifier
                         .weight(1f)
+                        .fillMaxHeight()
                         .padding(vertical = 4.dp)
                         .heightIn(min = HabilioTheme.alturaMinima(52.dp))
                 ) {
@@ -127,7 +131,7 @@ fun SelectorZonaHabilio(
                     }
                 }
             }
-            if (fila.size == 1) Spacer(modifier = Modifier.weight(1f))
+            if (columnasZona == 2 && fila.size == 1) Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -399,7 +403,7 @@ fun ModalAvisoPrivacidad(
     alAceptar: () -> Unit,
     alCerrar: () -> Unit
 ) {
-    Dialog(
+    DialogoHabilio(
         onDismissRequest = alCerrar,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {

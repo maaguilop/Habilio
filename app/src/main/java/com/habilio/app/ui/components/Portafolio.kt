@@ -208,23 +208,26 @@ fun TarjetaTrabajoPortafolio(
                 Text(detalles, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = trabajo.fechaPublicacion.replace("Evidencia real • ", "Publicado en "),
-                    fontSize = 12.sp,
-                    color = HabilioTheme.TextoSecundario,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (trabajo.esComparativo) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    HabilioBadge(
-                        texto = "ANTES Y DESPUÉS",
-                        colorTexto = HabilioTheme.AzulVerificado,
-                        colorFondo = HabilioTheme.FondoAzulSuave
+            FilaAdaptable(
+                inicio = {
+                    Text(
+                        text = trabajo.fechaPublicacion.replace("Evidencia real • ", "Publicado en "),
+                        fontSize = 12.sp,
+                        color = HabilioTheme.TextoSecundario,
+                        fontWeight = FontWeight.Medium
                     )
+                },
+                fin = {
+                    if (trabajo.esComparativo) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        HabilioBadge(
+                            texto = "ANTES Y DESPUÉS",
+                            colorTexto = HabilioTheme.AzulVerificado,
+                            colorFondo = HabilioTheme.FondoAzulSuave
+                        )
+                    }
                 }
-            }
+            )
         }
     }
 }

@@ -208,41 +208,55 @@ fun PantallaRegistroTrabajador(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Indicador de pasos con nombre: la persona siempre sabe dónde está y cuánto falta
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("Edad y oficio", "Zona y horario", "Tu perfil", "Cuenta").forEachIndexed { i, nombrePaso ->
-                val n = i + 1
-                Text(
-                    text = "$n. $nombrePaso",
-                    fontSize = 10.sp,
-                    fontWeight = if (n == pasoActual) FontWeight.ExtraBold else FontWeight.Normal,
-                    color = when {
-                        n == pasoActual -> HabilioTheme.AmarilloAcentoTexto
-                        n < pasoActual -> HabilioTheme.VerdeExito
-                        else -> HabilioTheme.TextoSecundario
-                    }
-                )
+        // Indicador de pasos con nombre: la persona siempre sabe dónde está y cuánto falta.
+        // Con letra grande los 4 nombres no caben en una fila (se partían en vertical): se muestra solo el paso actual.
+        val nombresPasos = listOf("Edad y oficio", "Zona y horario", "Tu perfil", "Cuenta")
+        if (LocalDensity.current.fontScale > 1.3f) {
+            Text(
+                text = "Paso $pasoActual de ${nombresPasos.size}: ${nombresPasos[pasoActual - 1]}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = HabilioTheme.AmarilloAcentoTexto,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        } else {
+            Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                nombresPasos.forEachIndexed { i, nombrePaso ->
+                    val n = i + 1
+                    Text(
+                        text = "$n. $nombrePaso",
+                        fontSize = 10.sp,
+                        fontWeight = if (n == pasoActual) FontWeight.ExtraBold else FontWeight.Normal,
+                        color = when {
+                            n == pasoActual -> HabilioTheme.AmarilloAcentoTexto
+                            n < pasoActual -> HabilioTheme.VerdeExito
+                            else -> HabilioTheme.TextoSecundario
+                        },
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "PROGRESO DEL REGISTRO",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = HabilioTheme.TextoSecundario
-            )
-            Text(
-                text = "${(pasoActual * 100) / totalPasos}%",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = HabilioTheme.AmarilloAcentoTexto
-            )
-        }
+        FilaAdaptable(
+            inicio = {
+                Text(
+                    text = "PROGRESO DEL REGISTRO",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HabilioTheme.TextoSecundario
+                )
+            },
+            fin = {
+                Text(
+                    text = "${(pasoActual * 100) / totalPasos}%",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = HabilioTheme.AmarilloAcentoTexto
+                )
+            }
+        )
         Spacer(modifier = Modifier.height(6.dp))
         LinearProgressIndicator(
             progress = { pasoActual.toFloat() / totalPasos.toFloat() },
@@ -329,10 +343,17 @@ fun PantallaRegistroTrabajador(
                             Text("¿Qué oficio desempeñas?", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            OFICIOS_HABILIO.chunked(2).forEach { fila ->
+                            // Las tarjetas de una misma fila miden lo mismo (IntrinsicSize.Min + fillMaxHeight), así ya no
+                            // quedan huecos cuando un nombre largo ocupa dos renglones. Con letra muy grande se usa
+                            // una sola columna para que los nombres no se partan.
+                            val columnasOficio = if (LocalDensity.current.fontScale > 1.3f) 1 else 2
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OFICIOS_HABILIO.chunked(columnasOficio).forEach { fila ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(IntrinsicSize.Min),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     fila.forEach { (tituloOficio, subOficio, iconoOficio) ->
                                         val seleccionado = oficioSeleccionado == tituloOficio
@@ -348,12 +369,12 @@ fun PantallaRegistroTrabajador(
                                             ),
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .padding(vertical = 4.dp)
+                                                .fillMaxHeight()
                                                 .heightIn(min = HabilioTheme.alturaMinima(52.dp))
                                                 .alpha(if (bloqueado) 0.5f else 1f)
                                         ) {
                                             Row(
-                                                modifier = Modifier.padding(12.dp),
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Icon(
@@ -363,7 +384,7 @@ fun PantallaRegistroTrabajador(
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
-                                                Column {
+                                                Column(modifier = Modifier.weight(1f)) {
                                                     Text(
                                                         text = tituloOficio,
                                                         fontWeight = FontWeight.Bold,
@@ -379,8 +400,9 @@ fun PantallaRegistroTrabajador(
                                             }
                                         }
                                     }
-                                    if (fila.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                    if (columnasOficio == 2 && fila.size == 1) Spacer(modifier = Modifier.weight(1f))
                                 }
+                            }
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))

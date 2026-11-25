@@ -123,29 +123,28 @@ fun PantallaDetalleEspecialista(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = alVolverAlListado, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = HabilioTheme.TextoPrimario, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Volver al listado", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    HabilioBadge(
-                        texto = if (tieneEvidencia) "Con trabajos publicados" else "Perfil registrado",
-                        colorTexto = if (tieneEvidencia) HabilioTheme.AzulVerificado else HabilioTheme.TextoSecundario,
-                        colorFondo = if (tieneEvidencia) HabilioTheme.FondoAzulSuave else HabilioTheme.SuperficieElevada
-                    )
-                    // Acta #25: reportar conducta o bloquear desde el perfil
-                    if (alReportarEspecialista != null && alBloquearEspecialista != null) {
-                        MenuSeguridadUsuario(alReportar = alReportarEspecialista, alBloquear = alBloquearEspecialista)
+            FilaAdaptable(
+                inicio = {
+                    TextButton(onClick = alVolverAlListado, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = HabilioTheme.TextoPrimario, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Volver al listado", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
+                    }
+                },
+                fin = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        HabilioBadge(
+                            texto = if (tieneEvidencia) "Con trabajos publicados" else "Perfil registrado",
+                            colorTexto = if (tieneEvidencia) HabilioTheme.AzulVerificado else HabilioTheme.TextoSecundario,
+                            colorFondo = if (tieneEvidencia) HabilioTheme.FondoAzulSuave else HabilioTheme.SuperficieElevada
+                        )
+                        // Acta #25: reportar conducta o bloquear desde el perfil
+                        if (alReportarEspecialista != null && alBloquearEspecialista != null) {
+                            MenuSeguridadUsuario(alReportar = alReportarEspecialista, alBloquear = alBloquearEspecialista)
+                        }
                     }
                 }
-            }
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -289,18 +288,18 @@ fun PantallaDetalleEspecialista(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Recomendaciones (${resenas.size})", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                if (puedeCalificar) {
-                    TextButton(onClick = alAbrirModalCalificar) {
-                        Text("+ Escribir reseña", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AmarilloAcentoTexto)
+            FilaAdaptable(
+                inicio = {
+                    Text("Recomendaciones (${resenas.size})", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                },
+                fin = {
+                    if (puedeCalificar) {
+                        TextButton(onClick = alAbrirModalCalificar) {
+                            Text("+ Escribir reseña", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AmarilloAcentoTexto)
+                        }
                     }
                 }
-            }
+            )
 
             EstadoCargaOVacio(
                 cargando = false,
@@ -375,10 +374,14 @@ fun TarjetaResena(
     alReportar: (() -> Unit)? = null
 ) {
     HabilioTarjeta(radioEsquina = 14.dp, paddingInterno = 14.dp) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = autor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Text(text = "★".repeat(estrellas.coerceIn(1, 5)), color = HabilioTheme.AmarilloAcentoTexto, fontSize = 14.sp)
-        }
+        FilaAdaptable(
+            inicio = {
+                Text(text = autor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            },
+            fin = {
+                Text(text = "★".repeat(estrellas.coerceIn(1, 5)), color = HabilioTheme.AmarilloAcentoTexto, fontSize = 14.sp)
+            }
+        )
         Spacer(modifier = Modifier.height(6.dp))
         Text(text = comentario, fontSize = 13.sp, fontStyle = FontStyle.Italic, lineHeight = 19.sp)
         Spacer(modifier = Modifier.height(6.dp))

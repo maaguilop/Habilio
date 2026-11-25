@@ -255,10 +255,15 @@ fun PantallaEditarPerfil(
                 Text("Oficio Principal", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                OFICIOS_HABILIO.chunked(2).forEach { fila ->
+                // Tarjetas parejas por fila y una sola columna con letra grande (igual que en el registro)
+                val columnasOficio = if (LocalDensity.current.fontScale > 1.3f) 1 else 2
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OFICIOS_HABILIO.chunked(columnasOficio).forEach { fila ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         fila.forEach { (tituloOficio, subOficio, iconoOficio) ->
                             val seleccionado = oficioSeleccionado == tituloOficio
@@ -275,7 +280,7 @@ fun PantallaEditarPerfil(
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(vertical = 4.dp)
+                                    .fillMaxHeight()
                                     .heightIn(min = HabilioTheme.alturaMinima(52.dp))
                                     .alpha(if (bloqueado) 0.5f else 1f)
                             ) {
@@ -290,7 +295,7 @@ fun PantallaEditarPerfil(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Column {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = tituloOficio,
                                             fontWeight = FontWeight.Bold,
@@ -306,8 +311,9 @@ fun PantallaEditarPerfil(
                                 }
                             }
                         }
-                        if (fila.size == 1) Spacer(modifier = Modifier.weight(1f))
+                        if (columnasOficio == 2 && fila.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
+                }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))

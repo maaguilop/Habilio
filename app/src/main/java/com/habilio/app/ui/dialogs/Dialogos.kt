@@ -139,7 +139,7 @@ fun ModalSolicitarServicio(
     val formularioValido = descripcionOk && ubicacionOk && montoOk
     val montoFinal = if (presupuestoTexto.isBlank()) 0.0 else (montoIngresado ?: 0.0)
 
-    Dialog(
+    DialogoHabilio(
         onDismissRequest = { if (!enviando) alCerrar() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
@@ -377,7 +377,7 @@ fun ModalSolicitudConfirmada(
         "#HAB-$digitos"
     }
 
-    Dialog(
+    DialogoHabilio(
         onDismissRequest = alVolverAlInicio,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
@@ -453,62 +453,62 @@ fun ModalSolicitudConfirmada(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 HabilioTarjeta(colorFondo = HabilioTheme.SuperficieInput) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            AvatarUsuario(
-                                tamano = 42.dp,
-                                esCircular = true,
-                                icono = Icons.Default.Handyman,
-                                colorIcono = HabilioTheme.AmarilloAcentoTexto
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text(solicitud.oficioTrabajador, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    FilaAdaptable(
+                        inicio = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AvatarUsuario(
+                                    tamano = 42.dp,
+                                    esCircular = true,
+                                    icono = Icons.Default.Handyman,
+                                    colorIcono = HabilioTheme.AmarilloAcentoTexto
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text(solicitud.oficioTrabajador, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                                }
                             }
+                        },
+                        fin = {
+                            HabilioBadge(
+                                texto = "Activo",
+                                colorTexto = HabilioTheme.VerdeExito,
+                                colorFondo = HabilioTheme.FondoVerdeSuave
+                            )
                         }
-                        HabilioBadge(
-                            texto = "Activo",
-                            colorTexto = HabilioTheme.VerdeExito,
-                            colorFondo = HabilioTheme.FondoVerdeSuave
-                        )
-                    }
+                    )
 
                     Spacer(modifier = Modifier.height(14.dp))
                     HorizontalDivider(color = HabilioTheme.BordeTarjeta)
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("FOLIO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = folioCorto,
-                                fontSize = 15.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    FilaAdaptable(
+                        inicio = {
+                            Column {
+                                Text("FOLIO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = folioCorto,
+                                    fontSize = 15.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        },
+                        fin = {
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    fontSize = 16.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = HabilioTheme.AmarilloAcentoTexto
+                                )
+                            }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
-                                maxLines = 1,
-                                softWrap = false,
-                                fontSize = 16.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = HabilioTheme.AmarilloAcentoTexto
-                            )
-                        }
-                    }
+                    )
 
                     Spacer(modifier = Modifier.height(14.dp))
                     HorizontalDivider(color = HabilioTheme.BordeTarjeta)
@@ -577,7 +577,7 @@ fun ModalEvaluarServicio(
         else -> "1 Estrella · Mal servicio"
     }
 
-    Dialog(
+    DialogoHabilio(
         onDismissRequest = alCerrar,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
@@ -689,10 +689,10 @@ fun ModalEvaluarServicio(
 /** Ventana con la sección anterior, para que quien presta el servicio la abra desde su lista de solicitudes. */
 @Composable
 fun DialogoAcuerdos(solicitud: SolicitudItem, rol: String, alCerrar: () -> Unit) {
-    Dialog(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         HabilioTarjeta(
             radioEsquina = 24.dp, paddingInterno = 18.dp,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 640.dp).verticalScroll(rememberScrollState())
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = altoMaximoVentana()).verticalScroll(rememberScrollState())
         ) {
             EncabezadoModal(titulo = "Presupuesto e historial", icono = Icons.Default.Timeline, alCerrar = alCerrar)
             SeccionAcuerdosYHistorial(solicitud, rol)
@@ -723,7 +723,7 @@ fun DialogoCancelacion(
     val comentarioObligatorio = !dentroDePlazo || motivo == "Otro motivo"
     val valido = motivo.isNotBlank() && (!comentarioObligatorio || comentario.trim().length >= 10)
 
-    Dialog(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         HabilioTarjeta(
             radioEsquina = 24.dp, paddingInterno = 20.dp,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
@@ -765,7 +765,7 @@ fun DialogoCancelacion(
 fun DialogoReportarResena(alCerrar: () -> Unit, alEnviar: (criterio: String, detalle: String) -> Unit) {
     var criterio by remember { mutableStateOf("") }
     var detalle by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         HabilioTarjeta(
             radioEsquina = 24.dp, paddingInterno = 20.dp,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
@@ -788,8 +788,8 @@ fun DialogoReportarResena(alCerrar: () -> Unit, alEnviar: (criterio: String, det
 /** Avisos internos (Acta #13): lista de movimientos nuevos dirigidos a la persona que usa la app. */
 @Composable
 fun DialogoAvisos(avisos: List<EventoSolicitud>, alCerrar: () -> Unit) {
-    Dialog(onDismissRequest = alCerrar) {
-        HabilioTarjeta(radioEsquina = 20.dp, paddingInterno = 18.dp, modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+    DialogoHabilio(onDismissRequest = alCerrar) {
+        HabilioTarjeta(radioEsquina = 20.dp, paddingInterno = 18.dp, modifier = Modifier.heightIn(max = altoMaximoVentana()).verticalScroll(rememberScrollState())) {
             EncabezadoModal(titulo = "Avisos", icono = Icons.Default.Notifications, alCerrar = alCerrar)
             if (avisos.isEmpty()) Text("No tienes avisos nuevos.", fontSize = 14.sp, color = HabilioTheme.TextoSecundario)
             avisos.forEach {

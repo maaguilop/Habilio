@@ -133,56 +133,55 @@ fun PantallaPerfilCliente(
                 .padding(16.dp)
         ) {
             HabilioTarjeta {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(contentAlignment = Alignment.BottomEnd) {
-                            AvatarUsuario(
-                                tamano = 64.dp,
-                                esCircular = true,
-                                colorIcono = HabilioTheme.TextoPrimario,
-                                fotoUrl = cliente?.fotoUrl
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(HabilioTheme.VerdeExito),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = HabilioTheme.TextoSobreVerde, modifier = Modifier.size(14.dp))
+                FilaAdaptable(
+                    inicio = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                AvatarUsuario(
+                                    tamano = 64.dp,
+                                    esCircular = true,
+                                    colorIcono = HabilioTheme.TextoPrimario,
+                                    fotoUrl = cliente?.fotoUrl
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .background(HabilioTheme.VerdeExito),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = HabilioTheme.TextoSobreVerde, modifier = Modifier.size(14.dp))
+                                }
+                            }
+    
+                            Spacer(modifier = Modifier.width(14.dp))
+    
+                            Column {
+                                Text(cliente?.nombre ?: "Cliente Habilio", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                HabilioBadge(
+                                    texto = "✓ Cuenta Activa",
+                                    colorTexto = HabilioTheme.VerdeExito,
+                                    colorFondo = HabilioTheme.FondoVerdeSuave
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Miembro local • ${cliente?.zona ?: "Pénjamo, Gto."}", fontSize = 13.sp, color = HabilioTheme.TextoSecundario)
                             }
                         }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column {
-                            Text(cliente?.nombre ?: "Cliente Habilio", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            HabilioBadge(
-                                texto = "✓ Cuenta Activa",
-                                colorTexto = HabilioTheme.VerdeExito,
-                                colorFondo = HabilioTheme.FondoVerdeSuave
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Miembro local • ${cliente?.zona ?: "Pénjamo, Gto."}", fontSize = 13.sp, color = HabilioTheme.TextoSecundario)
+                    },
+                    fin = {
+                        OutlinedButton(
+                            onClick = alEditarPerfil,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
-
-                    OutlinedButton(
-                        onClick = alEditarPerfil,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, HabilioTheme.AmarilloPrimario),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Editar perfil", tint = HabilioTheme.AmarilloAcentoTexto, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Editar", color = HabilioTheme.AmarilloAcentoTexto, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
                 HorizontalDivider(color = HabilioTheme.BordeTarjeta)
@@ -251,11 +250,14 @@ fun PantallaPerfilCliente(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Casa Principal", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            HabilioBadge("Frecuente", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
-                        }
+                        FilaAdaptable(
+                            inicio = {
+                                Text("Casa Principal", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            },
+                            fin = {
+                                HabilioBadge("Frecuente", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
+                            }
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(cliente?.direccion ?: "Calle Hidalgo #114, Zona Centro", fontSize = 14.sp)
                         Text("${cliente?.zona ?: "Pénjamo, Guanajuato"} • CP 36900", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
@@ -265,11 +267,14 @@ fun PantallaPerfilCliente(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Servicios Contratados", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.width(8.dp))
-                HabilioBadge("${solicitudes.size} registros", HabilioTheme.TextoSecundario, HabilioTheme.SuperficieElevada)
-            }
+            FilaAdaptable(
+                inicio = {
+                    Text("Servicios Contratados", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                },
+                fin = {
+                    HabilioBadge("${solicitudes.size} registros", HabilioTheme.TextoSecundario, HabilioTheme.SuperficieElevada)
+                }
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -286,67 +291,66 @@ fun PantallaPerfilCliente(
                 val esperandoConfirmacion = sol.estado == "esperando_confirmacion"
 
                 HabilioTarjeta(modifier = Modifier.padding(bottom = 14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            AvatarUsuario(tamano = 44.dp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(sol.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(Icons.Default.Verified, contentDescription = null, tint = HabilioTheme.VerdeExito, modifier = Modifier.size(15.dp))
+                    FilaAdaptable(
+                        inicio = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AvatarUsuario(tamano = 44.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(sol.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.Verified, contentDescription = null, tint = HabilioTheme.VerdeExito, modifier = Modifier.size(15.dp))
+                                    }
+                                    Text(sol.oficioTrabajador, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                                 }
-                                Text(sol.oficioTrabajador, fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                             }
+                        },
+                        fin = {
+                            val (textoBadge, colorTextoBadge, colorFondoBadge) = when (sol.estado) {
+                                "completado" -> Triple("★ Completado", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
+                                "esperando_confirmacion" -> Triple("⏳ Por confirmar", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
+                                "en_ejecucion" -> Triple("● En ejecución", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
+                                "cancelada" -> Triple("✕ Cancelada", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
+                                "rechazado" -> Triple("✕ Rechazado", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
+                                else -> Triple("● Pendiente", HabilioTheme.AzulVerificado, HabilioTheme.FondoAzulSuave)
+                            }
+                            HabilioBadge(textoBadge, colorTextoBadge, colorFondoBadge)
                         }
-
-                        val (textoBadge, colorTextoBadge, colorFondoBadge) = when (sol.estado) {
-                            "completado" -> Triple("★ Completado", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
-                            "esperando_confirmacion" -> Triple("⏳ Por confirmar", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
-                            "en_ejecucion" -> Triple("● En ejecución", HabilioTheme.AmarilloAcentoTexto, HabilioTheme.FondoAmarilloSuave)
-                            "cancelada" -> Triple("✕ Cancelada", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
-                            "rechazado" -> Triple("✕ Rechazado", HabilioTheme.RojoUrgente, HabilioTheme.FondoRojoSuave)
-                            else -> Triple("● Pendiente", HabilioTheme.AzulVerificado, HabilioTheme.FondoAzulSuave)
-                        }
-                        HabilioBadge(textoBadge, colorTextoBadge, colorFondoBadge)
-                    }
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     HabilioTarjeta(colorFondo = HabilioTheme.SuperficieInput, radioEsquina = 10.dp, paddingInterno = 12.dp) {
                         Text(sol.descripcion, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = when {
-                                    completado -> "✓ Servicio finalizado"
-                                    cancelada -> "✕ Solicitud cancelada por ti"
-                                    rechazado -> "✕ Solicitud rechazada"
-                                    esperandoConfirmacion -> "⏳ Especialista terminó • Confirma el cierre"
-                                    else -> "🤝 Acuerdo directo en curso"
-                                },
-                                fontSize = 12.sp,
-                                color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoSecundario
-                            )
-                            Text(
-                                text = "$${String.format("%.2f", sol.monto)} MXN",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 16.sp,
-                                color = when {
-                                    completado -> HabilioTheme.VerdeExito
-                                    cancelada || rechazado -> HabilioTheme.TextoSecundario
-                                    else -> HabilioTheme.AmarilloAcentoTexto
-                                }
-                            )
-                        }
+                        FilaAdaptable(
+                            inicio = {
+                                Text(
+                                    text = when {
+                                        completado -> "✓ Servicio finalizado"
+                                        cancelada -> "✕ Solicitud cancelada por ti"
+                                        rechazado -> "✕ Solicitud rechazada"
+                                        esperandoConfirmacion -> "⏳ Especialista terminó • Confirma el cierre"
+                                        else -> "🤝 Acuerdo directo en curso"
+                                    },
+                                    fontSize = 12.sp,
+                                    color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoSecundario
+                                )
+                            },
+                            fin = {
+                                Text(
+                                    text = "$${String.format("%.2f", sol.monto)} MXN",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp,
+                                    color = when {
+                                        completado -> HabilioTheme.VerdeExito
+                                        cancelada || rechazado -> HabilioTheme.TextoSecundario
+                                        else -> HabilioTheme.AmarilloAcentoTexto
+                                    }
+                                )
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))

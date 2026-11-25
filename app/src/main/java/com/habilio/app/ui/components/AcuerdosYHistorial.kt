@@ -281,14 +281,18 @@ fun SeccionAcuerdosYHistorial(solicitud: SolicitudItem, rol: String) {
                 var respuesta by remember(d.id) { mutableStateOf("") }
                 HabilioTarjeta(colorFondo = HabilioTheme.SuperficieInput, radioEsquina = 12.dp, paddingInterno = 12.dp,
                     modifier = Modifier.padding(bottom = 8.dp)) {
-                    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Text(d.motivo, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoPrimario, modifier = Modifier.weight(1f))
-                        HabilioBadge(
-                            texto = d.estado.uppercase(),
-                            colorTexto = if (d.estado == "resuelto") HabilioTheme.VerdeExito else HabilioTheme.AmarilloAcentoTexto,
-                            colorFondo = if (d.estado == "resuelto") HabilioTheme.FondoVerdeSuave else HabilioTheme.FondoAmarilloSuave
-                        )
-                    }
+                    FilaAdaptable(
+                        inicio = {
+                            Text(d.motivo, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoPrimario)
+                        },
+                        fin = {
+                            HabilioBadge(
+                                texto = d.estado.uppercase(),
+                                colorTexto = if (d.estado == "resuelto") HabilioTheme.VerdeExito else HabilioTheme.AmarilloAcentoTexto,
+                                colorFondo = if (d.estado == "resuelto") HabilioTheme.FondoVerdeSuave else HabilioTheme.FondoAmarilloSuave
+                            )
+                        }
+                    )
                     Text(d.descripcion, fontSize = 13.sp, color = HabilioTheme.TextoPrimario, modifier = Modifier.padding(top = 4.dp))
                     Text("Abierto por ${if (d.abiertoPorRol == "cliente") "quien solicitó" else "la persona especialista"} • ${formatearFechaEvento(d.creadoEn)}",
                         fontSize = 11.sp, color = HabilioTheme.TextoSecundario)

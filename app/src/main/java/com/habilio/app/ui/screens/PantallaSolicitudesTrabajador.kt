@@ -272,39 +272,41 @@ fun TarjetaSolicitudNueva(
     val esRechazada = solicitud.estado == "rechazado"
 
     HabilioTarjeta {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                AvatarUsuario(tamano = 46.dp)
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+        FilaAdaptable(
+            inicio = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AvatarUsuario(tamano = 46.dp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    }
                 }
+            },
+            fin = {
+                val textoEstado = when {
+                    esCancelada -> "✕ Cancelada"
+                    esRechazada -> "Rechazada"
+                    else -> "⏱ Nueva"
+                }
+                HabilioBadge(
+                    texto = textoEstado,
+                    colorTexto = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.TextoSecundario,
+                    colorFondo = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.FondoRojoSuave else HabilioTheme.SuperficieElevada
+                )
             }
-
-            val textoEstado = when {
-                esCancelada -> "✕ Cancelada"
-                esRechazada -> "Rechazada"
-                else -> "⏱ Nueva"
-            }
-
-            HabilioBadge(
-                texto = textoEstado,
-                colorTexto = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.TextoSecundario,
-                colorFondo = if (solicitud.esUrgente || esCancelada || esRechazada) HabilioTheme.FondoRojoSuave else HabilioTheme.SuperficieElevada
-            )
-        }
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HabilioBadge("🛠️ ${solicitud.oficioEtiqueta}", HabilioTheme.TextoPrimario, HabilioTheme.SuperficieElevada)
-            HabilioBadge("🤝 Acuerdo directo", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
-        }
+        FilaAdaptable(
+            inicio = {
+                HabilioBadge("🛠️ ${solicitud.oficioEtiqueta}", HabilioTheme.TextoPrimario, HabilioTheme.SuperficieElevada)
+            },
+            fin = {
+                HabilioBadge("🤝 Acuerdo directo", HabilioTheme.VerdeExito, HabilioTheme.FondoVerdeSuave)
+            }
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
 
@@ -328,32 +330,32 @@ fun TarjetaSolicitudNueva(
         Spacer(modifier = Modifier.height(12.dp))
 
         HabilioTarjeta(colorFondo = HabilioTheme.SuperficieInput, radioEsquina = 10.dp, paddingInterno = 12.dp) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("PRESUPUESTO ORIENTATIVO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoSecundario)
+            FilaAdaptable(
+                inicio = {
+                    Column {
+                        Text("PRESUPUESTO ORIENTATIVO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoSecundario)
+                        Text(
+                            text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
+                            maxLines = 1,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            color = HabilioTheme.AmarilloAcentoTexto
+                        )
+                    }
+                },
+                fin = {
                     Text(
-                        text = if (solicitud.monto > 0) "$${String.format("%.2f", solicitud.monto)} MXN" else "Por cotizar",
-                        maxLines = 1,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 16.sp,
-                        color = HabilioTheme.AmarilloAcentoTexto
+                        text = when {
+                            esCancelada -> "✕ Cancelada"
+                            esRechazada -> "✕ Rechazada"
+                            else -> "✓ Solicitud activa"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.VerdeExito
                     )
                 }
-                Text(
-                    text = when {
-                        esCancelada -> "✕ Cancelada"
-                        esRechazada -> "✕ Rechazada"
-                        else -> "✓ Solicitud activa"
-                    },
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (esCancelada || esRechazada) HabilioTheme.RojoUrgente else HabilioTheme.VerdeExito
-                )
-            }
+            )
         }
 
         if (solicitud.estado == "pendiente") {
@@ -406,35 +408,34 @@ fun TarjetaSolicitudEnEjecucion(
         colorBorde = if (esperandoConfirmacion) HabilioTheme.AmarilloPrimario else HabilioTheme.VerdeExito,
         grosorBorde = 1.5.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                AvatarUsuario(
-                    tamano = 44.dp,
-                    icono = Icons.Outlined.WorkOutline,
-                    colorIcono = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
+        FilaAdaptable(
+            inicio = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AvatarUsuario(
+                        tamano = 44.dp,
+                        icono = Icons.Outlined.WorkOutline,
+                        colorIcono = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
+                        colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    }
+                }
+            },
+            fin = {
+                HabilioBadge(
+                    texto = when {
+                        completada -> "✓ Completado"
+                        esperandoConfirmacion -> "⏳ Esperando confirmación"
+                        else -> "● En Ejecución"
+                    },
+                    colorTexto = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
                     colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
                 )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
-                }
             }
-
-            HabilioBadge(
-                texto = when {
-                    completada -> "✓ Completado"
-                    esperandoConfirmacion -> "⏳ Esperando confirmación"
-                    else -> "● En Ejecución"
-                },
-                colorTexto = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito,
-                colorFondo = if (esperandoConfirmacion) HabilioTheme.FondoAmarilloSuave else HabilioTheme.FondoVerdeSuave
-            )
-        }
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -443,30 +444,30 @@ fun TarjetaSolicitudEnEjecucion(
         Spacer(modifier = Modifier.height(12.dp))
 
         HabilioTarjeta(colorFondo = HabilioTheme.SuperficieInput, radioEsquina = 10.dp, paddingInterno = 12.dp) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Presupuesto acordado", fontSize = 11.sp, color = HabilioTheme.TextoSecundario)
+            FilaAdaptable(
+                inicio = {
+                    Column {
+                        Text("Presupuesto acordado", fontSize = 11.sp, color = HabilioTheme.TextoSecundario)
+                        Text(
+                            text = "$${String.format("%.2f", solicitud.monto)} MXN",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 17.sp,
+                            color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito
+                        )
+                    }
+                },
+                fin = {
                     Text(
-                        text = "$${String.format("%.2f", solicitud.monto)} MXN",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 17.sp,
-                        color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.VerdeExito
+                        text = when {
+                            completada -> "✓ Trabajo concluido"
+                            esperandoConfirmacion -> "⏳ Por confirmar por el cliente"
+                            else -> "🛠️ En proceso"
+                        },
+                        fontSize = 12.sp,
+                        color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoPrimario
                     )
                 }
-                Text(
-                    text = when {
-                        completada -> "✓ Trabajo concluido"
-                        esperandoConfirmacion -> "⏳ Por confirmar por el cliente"
-                        else -> "🛠️ En proceso"
-                    },
-                    fontSize = 12.sp,
-                    color = if (esperandoConfirmacion) HabilioTheme.AmarilloAcentoTexto else HabilioTheme.TextoPrimario
-                )
-            }
+            )
         }
 
         if (!completada) {

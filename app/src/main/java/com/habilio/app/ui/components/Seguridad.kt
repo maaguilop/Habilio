@@ -167,7 +167,7 @@ fun DialogoReportarConducta(
     val detalleObligatorio = motivo == "Otro motivo"
     val valido = motivo.isNotBlank() && (!detalleObligatorio || detalle.trim().length >= 10)
 
-    Dialog(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         HabilioTarjeta(
             radioEsquina = 24.dp, paddingInterno = 20.dp,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
@@ -228,11 +228,15 @@ fun DialogoConfirmarBloqueo(
     alCerrar: () -> Unit,
     alConfirmar: () -> Unit
 ) {
+    val densidadApp = LocalDensity.current
     AlertDialog(
         onDismissRequest = alCerrar,
         icon = { Icon(Icons.Default.Block, contentDescription = null, tint = HabilioTheme.RojoUrgente) },
-        title = { Text("¿Bloquear a ${objetivo.nombre}?") },
+        title = {
+            CompositionLocalProvider(LocalDensity provides densidadApp) { Text("¿Bloquear a ${objetivo.nombre}?") }
+        },
         text = {
+            CompositionLocalProvider(LocalDensity provides densidadApp) {
             Column {
                 val efectos = buildList {
                     if (quienBloqueaEsEspecialista) {
@@ -247,15 +251,20 @@ fun DialogoConfirmarBloqueo(
                 }
                 efectos.forEach { Text("• $it", fontSize = 14.sp, lineHeight = 20.sp) }
             }
+            }
         },
         confirmButton = {
-            TextButton(onClick = alConfirmar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                Text("Bloquear", color = HabilioTheme.RojoUrgente, fontWeight = FontWeight.Bold)
+            CompositionLocalProvider(LocalDensity provides densidadApp) {
+                TextButton(onClick = alConfirmar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
+                    Text("Bloquear", color = HabilioTheme.RojoUrgente, fontWeight = FontWeight.Bold)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = alCerrar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                Text("Cancelar", color = HabilioTheme.TextoPrimario)
+            CompositionLocalProvider(LocalDensity provides densidadApp) {
+                TextButton(onClick = alCerrar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
+                    Text("Cancelar", color = HabilioTheme.TextoPrimario)
+                }
             }
         },
         containerColor = HabilioTheme.SuperficieTarjeta,
@@ -277,10 +286,10 @@ fun DialogoCentroSeguridad(
     alCerrar: () -> Unit
 ) {
     val contexto = androidx.compose.ui.platform.LocalContext.current
-    Dialog(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         HabilioTarjeta(
             radioEsquina = 24.dp, paddingInterno = 20.dp,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 680.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = altoMaximoVentana())
                 .verticalScroll(rememberScrollState())
         ) {
             EncabezadoModal(titulo = "Centro de seguridad", icono = Icons.Default.Shield, alCerrar = alCerrar)
@@ -455,11 +464,13 @@ fun TarjetaSeguridadPerfil(totalBloqueados: Int, alAbrirCentro: () -> Unit) {
 @Composable
 fun MenuSeguridadUsuario(alReportar: () -> Unit, alBloquear: () -> Unit) {
     var abierto by remember { mutableStateOf(false) }
+    val densidadApp = LocalDensity.current
     Box {
         IconButton(onClick = { abierto = true }) {
             Icon(Icons.Default.MoreVert, contentDescription = "Más opciones: reportar o bloquear", tint = HabilioTheme.TextoPrimario)
         }
         DropdownMenu(expanded = abierto, onDismissRequest = { abierto = false }) {
+            CompositionLocalProvider(LocalDensity provides densidadApp) {
             DropdownMenuItem(
                 text = { Text("Reportar conducta") },
                 leadingIcon = { Icon(Icons.Default.Report, contentDescription = null) },
@@ -470,6 +481,7 @@ fun MenuSeguridadUsuario(alReportar: () -> Unit, alBloquear: () -> Unit) {
                 leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
                 onClick = { abierto = false; alBloquear() }
             )
+            }
         }
     }
 }

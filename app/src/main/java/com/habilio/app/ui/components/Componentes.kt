@@ -169,50 +169,47 @@ fun SeccionTamanoTexto(
     val nivelActivo = NIVELES_TEXTO.firstOrNull { abs(escalaActual - it.third) < 0.02f } ?: NIVELES_TEXTO.first()
 
     HabilioTarjeta(modifier = modifier) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(HabilioTheme.FondoAmarilloSuave),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.FormatSize,
-                        contentDescription = null,
-                        tint = HabilioTheme.AmarilloAcentoTexto,
-                        modifier = Modifier.size(20.dp)
-                    )
+        FilaAdaptable(
+            inicio = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(HabilioTheme.FondoAmarilloSuave),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FormatSize,
+                            contentDescription = null,
+                            tint = HabilioTheme.AmarilloAcentoTexto,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Tamaño del texto",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = HabilioTheme.TextoPrimario
+                        )
+                        Text(
+                            text = "Texto y botones de toda la app",
+                            fontSize = 12.sp,
+                            color = HabilioTheme.TextoSecundario
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "Tamaño del texto",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = HabilioTheme.TextoPrimario
-                    )
-                    Text(
-                        text = "Texto y botones de toda la app",
-                        fontSize = 12.sp,
-                        color = HabilioTheme.TextoSecundario
-                    )
-                }
+            },
+            fin = {
+                HabilioBadge(
+                    texto = "${nivelActivo.first} (${nivelActivo.second})",
+                    colorTexto = HabilioTheme.AmarilloAcentoTexto,
+                    colorFondo = HabilioTheme.FondoAmarilloSuave
+                )
             }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            HabilioBadge(
-                texto = "${nivelActivo.first} (${nivelActivo.second})",
-                colorTexto = HabilioTheme.AmarilloAcentoTexto,
-                colorFondo = HabilioTheme.FondoAmarilloSuave
-            )
-        }
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -340,7 +337,7 @@ fun ModalVerFotoCompleta(
     evidencia: EvidenciaItem,
     alCerrar: () -> Unit
 ) {
-    Dialog(
+    DialogoHabilio(
         onDismissRequest = alCerrar,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
@@ -420,7 +417,8 @@ fun ModalVerFotoCompleta(
                         Text(
                             text = "📍 ${evidencia.ubicacion}",
                             fontSize = 13.sp,
-                            color = HabilioTheme.TextoSecundario
+                            color = HabilioTheme.TextoSecundario,
+                            modifier = Modifier.weight(1f)
                         )
                         TextButton(onClick = alCerrar) {
                             Text(
@@ -473,23 +471,26 @@ fun HabilioTopBar(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Habilio",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = HabilioTheme.TextoPrimario,
-                                maxLines = 1
-                            )
-                            if (modoTrabajador) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                HabilioBadge(
-                                    texto = "● Modo especialista",
-                                    colorTexto = HabilioTheme.VerdeExito,
-                                    colorFondo = HabilioTheme.FondoVerdeSuave
+                        FilaAdaptable(
+                            inicio = {
+                                Text(
+                                    text = "Habilio",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = HabilioTheme.TextoPrimario,
+                                    maxLines = 1
                                 )
+                            },
+                            fin = {
+                                if (modoTrabajador) {
+                                    HabilioBadge(
+                                        texto = "● Modo especialista",
+                                        colorTexto = HabilioTheme.VerdeExito,
+                                        colorFondo = HabilioTheme.FondoVerdeSuave
+                                    )
+                                }
                             }
-                        }
+                        )
                         if (subtituloUbicacion != null) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
@@ -522,6 +523,84 @@ fun HabilioTopBar(
                 }
             }
             HorizontalDivider(color = HabilioTheme.BordeTarjeta, thickness = 1.dp)
+        }
+    }
+}
+
+/**
+ * Acta #22: ventana emergente que respeta el "Tamaño del texto" elegido en Habilio.
+ * Un Dialog de Android se dibuja en una ventana aparte que vuelve a tomar la escala de letra del sistema, así que
+ * el texto se veía chico aunque la persona hubiera elegido "Muy grande". Aquí se le pasa la misma escala de la app.
+ */
+@Composable
+fun DialogoHabilio(
+    onDismissRequest: () -> Unit,
+    properties: DialogProperties = DialogProperties(),
+    content: @Composable () -> Unit
+) {
+    val densidadApp = LocalDensity.current
+    Dialog(onDismissRequest = onDismissRequest, properties = properties) {
+        CompositionLocalProvider(LocalDensity provides densidadApp, content = content)
+    }
+}
+
+/** Alto máximo de una ventana: 90 % de la pantalla (antes había topes fijos que la hacían ver chica). */
+@Composable
+fun altoMaximoVentana(): Dp = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.9f).dp
+
+/**
+ * Acta #22: fila que se adapta al tamaño de letra. Pone [inicio] y [fin] lado a lado cuando [fin] ocupa como máximo
+ * [proporcionMaximaFin] del ancho; si no cabe (letra grande o textos largos), pone [fin] debajo de [inicio].
+ * Evita que una insignia o un botón le quite todo el espacio al texto de al lado y este se parta letra por letra.
+ */
+@Composable
+fun FilaAdaptable(
+    modifier: Modifier = Modifier,
+    separacion: Dp = 8.dp,
+    proporcionMaximaFin: Float = 0.5f,
+    inicio: @Composable () -> Unit,
+    fin: @Composable () -> Unit
+) {
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Box { inicio() }
+            Box { fin() }
+        },
+        modifier = modifier.fillMaxWidth()
+    ) { medibles, restricciones ->
+        val sueltas = restricciones.copy(minWidth = 0, minHeight = 0)
+        val espacio = separacion.roundToPx()
+        if (!restricciones.hasBoundedWidth) {
+            // Dentro de un desplazamiento horizontal: siempre lado a lado
+            val pIni = medibles[0].measure(sueltas)
+            val pFin = medibles[1].measure(sueltas)
+            val alto = maxOf(pIni.height, pFin.height)
+            return@Layout layout(pIni.width + espacio + pFin.width, alto) {
+                pIni.placeRelative(0, (alto - pIni.height) / 2)
+                pFin.placeRelative(pIni.width + espacio, (alto - pFin.height) / 2)
+            }
+        }
+        val ancho = restricciones.maxWidth
+        val pFin = medibles[1].measure(sueltas)
+        if (pFin.width == 0) {
+            // [fin] vacío (por ejemplo, una insignia que no aplica)
+            val pIni = medibles[0].measure(sueltas)
+            return@Layout layout(ancho, pIni.height) { pIni.placeRelative(0, 0) }
+        }
+        if (pFin.width <= ancho * proporcionMaximaFin) {
+            val pIni = medibles[0].measure(sueltas.copy(maxWidth = (ancho - pFin.width - espacio).coerceAtLeast(0)))
+            val alto = maxOf(pIni.height, pFin.height)
+            layout(ancho, alto) {
+                pIni.placeRelative(0, (alto - pIni.height) / 2)
+                pFin.placeRelative(ancho - pFin.width, (alto - pFin.height) / 2)
+            }
+        } else {
+            val pIni = medibles[0].measure(sueltas)
+            val espacioVertical = (espacio * 3) / 4
+            layout(ancho, pIni.height + espacioVertical + pFin.height) {
+                pIni.placeRelative(0, 0)
+                pFin.placeRelative(0, pIni.height + espacioVertical)
+            }
         }
     }
 }
@@ -856,31 +935,31 @@ fun HabilioCampoTexto(
     var mostrarContrasena by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = etiqueta,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = HabilioTheme.TextoPrimario
-            )
-            if (etiquetaDerecha != null) {
+        FilaAdaptable(
+            inicio = {
                 Text(
-                    text = etiquetaDerecha,
-                    fontSize = 12.sp,
-                    color = colorEtiquetaDerecha,
-                    fontWeight = FontWeight.Medium,
-                    modifier = if (accionEtiquetaDerecha != null) {
-                        Modifier
-                            .clickable(role = Role.Button, onClick = accionEtiquetaDerecha)
-                            .padding(vertical = 4.dp)
-                    } else Modifier
+                    text = etiqueta,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = HabilioTheme.TextoPrimario
                 )
+            },
+            fin = {
+                if (etiquetaDerecha != null) {
+                    Text(
+                        text = etiquetaDerecha,
+                        fontSize = 12.sp,
+                        color = colorEtiquetaDerecha,
+                        fontWeight = FontWeight.Medium,
+                        modifier = if (accionEtiquetaDerecha != null) {
+                            Modifier
+                                .clickable(role = Role.Button, onClick = accionEtiquetaDerecha)
+                                .padding(vertical = 4.dp)
+                        } else Modifier
+                    )
+                }
             }
-        }
+        )
 
         Spacer(modifier = Modifier.height(6.dp))
 

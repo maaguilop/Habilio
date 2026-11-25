@@ -84,6 +84,8 @@ import kotlin.math.max
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Acta #24: prepara la copia local para ver datos sin conexión
+        SupabaseService.inicializar(applicationContext)
 
         // Barras del sistema acordes a la preferencia guardada desde el primer frame (evita el "parpadeo" oscuro)
         val prefs = getSharedPreferences(AppConfig.PREFS_NAME, Context.MODE_PRIVATE)

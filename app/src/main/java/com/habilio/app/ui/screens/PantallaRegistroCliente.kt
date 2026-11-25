@@ -181,10 +181,16 @@ fun PantallaRegistroCliente(
                 etiqueta = "Crear Contraseña",
                 valor = contrasena,
                 alCambiarValor = { contrasena = it },
-                placeholder = "Mínimo 6 caracteres",
+                placeholder = TEXTO_REQUISITOS_CONTRASENA,
                 iconoInicial = Icons.Outlined.Lock,
                 esContrasena = true
             )
+            if (contrasena.isNotEmpty()) {
+                errorContrasena(contrasena)?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(it, color = HabilioTheme.RojoUrgente, fontSize = 12.sp)
+                }
+            }
 
             if (mensajeError != null) {
                 Spacer(modifier = Modifier.height(10.dp))
@@ -206,7 +212,7 @@ fun PantallaRegistroCliente(
                 habilitado = !cargando &&
                         nombre.isNotBlank() &&
                         telefono.filter { it.isDigit() }.length >= 10 &&
-                        contrasena.length >= 6 &&
+                        contrasenaValida(contrasena) &&
                         aceptaTerminosYEdad,
                 alClick = {
                     if (!aceptaTerminosYEdad) {

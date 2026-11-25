@@ -95,16 +95,27 @@ fun PantallaTallerTrabajador(
     alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alIrASolicitudes: () -> Unit,
     alCambiarRol: () -> Unit,
-    resenas: List<ResenaItem> = emptyList()
+    resenas: List<ResenaItem> = emptyList(),
+    alAbrirSeguridad: () -> Unit = {},
+    totalBloqueados: Int = 0
 ) {
     val contextoTaller = androidx.compose.ui.platform.LocalContext.current
     val scopeTaller = rememberCoroutineScope()
-    var tituloNuevaEvidencia by remember { mutableStateOf("") }
-    // Acta #8: datos del trabajo y consentimiento
-    var descripcionTrabajo by remember { mutableStateOf("") }
-    var tipoServicioTrabajo by remember { mutableStateOf("") }
+    // Acta #24: borrador local del trabajo (las fotos no se guardan: hay que elegirlas de nuevo)
+    val borradorTrabajo = remember(trabajador?.id) { BorradorLocal(contextoTaller, "trabajo.${trabajador?.id.orEmpty()}") }
+    val borradorRecuperado = remember(trabajador?.id) { borradorTrabajo.existe() }
     val hoyTexto = remember { SimpleDateFormat("dd/MM/yyyy", Locale.US).format(java.util.Date()) }
-    var fechaTrabajo by remember { mutableStateOf(hoyTexto) }
+    var tituloNuevaEvidencia by remember { mutableStateOf(borradorTrabajo.leer("titulo") ?: "") }
+    // Acta #8: datos del trabajo y consentimiento
+    var descripcionTrabajo by remember { mutableStateOf(borradorTrabajo.leer("descripcion") ?: "") }
+    var tipoServicioTrabajo by remember { mutableStateOf(borradorTrabajo.leer("tipo") ?: "") }
+    var fechaTrabajo by remember { mutableStateOf(borradorTrabajo.leer("fecha") ?: hoyTexto) }
+    LaunchedEffect(tituloNuevaEvidencia, descripcionTrabajo, tipoServicioTrabajo, fechaTrabajo) {
+        if (tituloNuevaEvidencia.isNotBlank() || descripcionTrabajo.isNotBlank() || tipoServicioTrabajo.isNotBlank()) {
+            borradorTrabajo.guardar("titulo" to tituloNuevaEvidencia, "descripcion" to descripcionTrabajo,
+                "tipo" to tipoServicioTrabajo, "fecha" to fechaTrabajo)
+        } else borradorTrabajo.borrar()
+    }
     var consentimientoImagenes by remember { mutableStateOf(false) }
     // Acta #9: informe de cada foto y progreso de subida
     val informesImagen = remember { mutableStateMapOf<Uri, InformeImagen>() }
@@ -314,6 +325,10 @@ fun PantallaTallerTrabajador(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            TarjetaSeguridadPerfil(totalBloqueados = totalBloqueados, alAbrirCentro = alAbrirSeguridad)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             if (trabajador?.autorizacionEstado == "pendiente") {
                 HabilioTarjeta(colorFondo = HabilioTheme.FondoAmarilloSuave, radioEsquina = 12.dp, paddingInterno = 12.dp) {
                     Text("Autorización pendiente de verificar", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = HabilioTheme.TextoPrimario)
@@ -499,6 +514,12 @@ fun PantallaTallerTrabajador(
                     }
                 }
 
+                if (borradorRecuperado && totalFotosElegidas == 0 && !publicando && mensajePublicacion == null &&
+                    tituloNuevaEvidencia.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Recuperamos el borrador de tu trabajo. Vuelve a elegir las fotos para publicarlo.",
+                        fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                }
                 if (mensajePublicacion != null) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
@@ -532,6 +553,7 @@ fun PantallaTallerTrabajador(
                             if (exito) {
                                 tituloNuevaEvidencia = ""; descripcionTrabajo = ""; tipoServicioTrabajo = ""
                                 fechaTrabajo = hoyTexto; consentimientoImagenes = false
+                                borradorTrabajo.borrar()
                                 fotoUnica = null
                                 fotosAntes.clear()
                                 fotosDespues.clear()
@@ -540,7 +562,8 @@ fun PantallaTallerTrabajador(
                                 mensajePublicacion = "¡Listo! Tu trabajo ya aparece en tu portafolio."
                             } else {
                                 // Los datos y las fotos se conservan: basta con volver a presionar el botón
-                                mensajePublicacion = "No se pudo publicar (se reintentó cada foto 3 veces). Tus datos y fotos siguen aquí: revisa tu conexión y presiona \"Reintentar\"."
+                                mensajePublicacion = (EstadoRed.ultimoMensaje ?: "No se pudo publicar el trabajo.") +
+                                    " Tus datos y fotos siguen aquí y las fotos ya subidas no se repiten ni se duplica el trabajo: presiona \"Reintentar\" cuando haya conexión."
                             }
                         }
                     },

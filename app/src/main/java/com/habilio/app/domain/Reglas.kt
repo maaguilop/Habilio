@@ -147,3 +147,93 @@ fun datosTutorValidos(nombre: String, telefono: String, parentesco: String) =
 fun armarDescripcionProfesional(queHaces: String, comoAprendiste: String, queDebenSaber: String): String =
     listOf(queHaces, comoAprendiste, queDebenSaber).map { it.trim().trimEnd('.') }.filter { it.isNotBlank() }
         .joinToString(". ").let { if (it.isBlank()) "" else "$it." }
+
+
+// ---------------------------------------------------------------------------------------------
+// Privacidad y ubicación: la solicitud guarda "zona||dirección exacta". Antes de que la persona
+// especialista acepte el trabajo solo puede ver la zona general; la dirección exacta se comparte
+// únicamente si quien solicita lo permite y solo después de la aceptación.
+// ---------------------------------------------------------------------------------------------
+const val SEPARADOR_UBICACION = "||"
+
+private val ESTADOS_TRABAJO_ACEPTADO = setOf("en_ejecucion", "esperando_confirmacion", "completado")
+
+/**
+ * Protección de datos de contacto (Acta #25): el teléfono de la otra persona solo se muestra cuando el servicio
+ * ya fue aceptado. Antes de eso la comunicación y los datos quedan dentro de Habilio.
+ */
+fun puedeVerContacto(estado: String): Boolean = estado in ESTADOS_TRABAJO_ACEPTADO
+
+fun armarUbicacionSolicitud(zona: String, direccionExacta: String, compartirExacta: Boolean): String {
+    val z = zona.trim()
+    val d = direccionExacta.trim()
+    return if (compartirExacta && d.isNotBlank()) "$z$SEPARADOR_UBICACION$d" else z
+}
+
+fun ubicacionZona(ubicacion: String): String = ubicacion.substringBefore(SEPARADOR_UBICACION).trim()
+
+fun ubicacionExacta(ubicacion: String): String =
+    if (ubicacion.contains(SEPARADOR_UBICACION)) ubicacion.substringAfter(SEPARADOR_UBICACION).trim() else ""
+
+/** Lo que ve quien solicita (sin el separador interno). */
+fun ubicacionParaCliente(ubicacion: String): String =
+    listOf(ubicacionZona(ubicacion), ubicacionExacta(ubicacion)).filter { it.isNotBlank() }.joinToString(", ")
+
+/** Lo que ve la persona especialista: solo la zona hasta que el trabajo es aceptado. */
+fun ubicacionParaEspecialista(solicitud: SolicitudItem): String =
+    if (solicitud.estado in ESTADOS_TRABAJO_ACEPTADO) ubicacionParaCliente(solicitud.ubicacion)
+    else ubicacionZona(solicitud.ubicacion)
+
+// ---------------------------------------------------------------------------------------------
+// Autenticación: política de contraseña y límite de intentos de inicio de sesión.
+// ---------------------------------------------------------------------------------------------
+const val MIN_CONTRASENA = 8
+const val TEXTO_REQUISITOS_CONTRASENA = "Mínimo 8 caracteres, con al menos una letra y un número"
+
+/** Devuelve null si la contraseña cumple la política, o el motivo por el que no. */
+fun errorContrasena(contrasena: String): String? = when {
+    contrasena.length < MIN_CONTRASENA -> "Usa al menos $MIN_CONTRASENA caracteres."
+    contrasena.none { it.isLetter() } -> "Incluye al menos una letra."
+    contrasena.none { it.isDigit() } -> "Incluye al menos un número."
+    else -> null
+}
+
+fun contrasenaValida(contrasena: String): Boolean = errorContrasena(contrasena) == null
+
+/**
+ * Límite de intentos en el dispositivo: tras 5 fallos seguidos se bloquea el inicio de sesión y el
+ * tiempo de espera crece (30 s, 60 s, 2 min... hasta 15 min). Es una capa adicional: el límite real
+ * debe configurarse también en el servidor (Supabase Auth > rate limits).
+ */
+object LimitadorIntentosLogin {
+    private const val MAX_INTENTOS = 5
+    private const val BASE_MS = 30_000L
+    private const val TOPE_MS = 15 * 60_000L
+    private var fallos = 0
+    private var bloqueos = 0
+    private var bloqueadoHasta = 0L
+
+    @Synchronized
+    fun segundosRestantes(): Int {
+        val resta = bloqueadoHasta - System.currentTimeMillis()
+        return if (resta > 0) ((resta + 999) / 1000).toInt() else 0
+    }
+
+    @Synchronized
+    fun registrarFallo() {
+        fallos++
+        if (fallos >= MAX_INTENTOS) {
+            val espera = minOf(BASE_MS shl minOf(bloqueos, 5), TOPE_MS)
+            bloqueadoHasta = System.currentTimeMillis() + espera
+            bloqueos++
+            fallos = 0
+        }
+    }
+
+    @Synchronized
+    fun registrarExito() {
+        fallos = 0
+        bloqueos = 0
+        bloqueadoHasta = 0L
+    }
+}

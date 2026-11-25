@@ -90,16 +90,18 @@ fun PantallaEditarPerfil(
     val contexto = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val esTrabajador = usuarioActual.rol == "trabajador"
+    // Acta #24: borrador local. Si falla el guardado o se cierra la app, lo escrito no se pierde.
+    val borrador = remember(usuarioActual.id) { BorradorLocal(contexto, "perfil.${usuarioActual.id}") }
 
-    var nombre by remember(usuarioActual) { mutableStateOf(usuarioActual.nombre) }
-    var telefono by remember(usuarioActual) { mutableStateOf(usuarioActual.telefono) }
-    var zona by remember(usuarioActual) { mutableStateOf(usuarioActual.zona) }
-    var direccion by remember(usuarioActual) { mutableStateOf(usuarioActual.direccion) }
-    var nombreTaller by remember(usuarioActual) { mutableStateOf(usuarioActual.nombreTaller) }
+    var nombre by remember(usuarioActual) { mutableStateOf(borrador.leer("nombre") ?: usuarioActual.nombre) }
+    var telefono by remember(usuarioActual) { mutableStateOf(borrador.leer("telefono") ?: usuarioActual.telefono) }
+    var zona by remember(usuarioActual) { mutableStateOf(borrador.leer("zona") ?: usuarioActual.zona) }
+    var direccion by remember(usuarioActual) { mutableStateOf(borrador.leer("direccion") ?: usuarioActual.direccion) }
+    var nombreTaller by remember(usuarioActual) { mutableStateOf(borrador.leer("taller") ?: usuarioActual.nombreTaller) }
     var oficioSeleccionado by remember(usuarioActual) {
         mutableStateOf(usuarioActual.oficio.ifBlank { "Albañilería" })
     }
-    var especialidad by remember(usuarioActual) { mutableStateOf(usuarioActual.especialidad) }
+    var especialidad by remember(usuarioActual) { mutableStateOf(borrador.leer("especialidad") ?: usuarioActual.especialidad) }
     var modalidadSeleccionada by remember(usuarioActual.id, usuarioActual.modalidad) {
         val modGuardada = usuarioActual.modalidad.trim()
         val idx = when {
@@ -119,12 +121,23 @@ fun PantallaEditarPerfil(
     var mensajeError by remember { mutableStateOf<String?>(null) }
 
     // Acta #6/#7/#1: datos profesionales editables
-    var aniosExp by remember(usuarioActual) { mutableStateOf(if (usuarioActual.aniosExperiencia > 0) usuarioActual.aniosExperiencia.toString() else "") }
+    var aniosExp by remember(usuarioActual) { mutableStateOf(borrador.leer("anios") ?: if (usuarioActual.aniosExperiencia > 0) usuarioActual.aniosExperiencia.toString() else "") }
     var dispSel by remember(usuarioActual) {
         mutableStateOf(usuarioActual.disponibilidad.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet())
     }
-    var precioTxt by remember(usuarioActual) { mutableStateOf(if (usuarioActual.precioDesde > 0) usuarioActual.precioDesde.toInt().toString() else "") }
+    var precioTxt by remember(usuarioActual) { mutableStateOf(borrador.leer("precio") ?: if (usuarioActual.precioDesde > 0) usuarioActual.precioDesde.toInt().toString() else "") }
     var mujeresOpt by remember(usuarioActual) { mutableStateOf(usuarioActual.visibleTalentoMujeres) }
+
+    LaunchedEffect(nombre, telefono, zona, direccion, nombreTaller, especialidad, aniosExp, precioTxt) {
+        val cambio = nombre != usuarioActual.nombre || telefono != usuarioActual.telefono || zona != usuarioActual.zona ||
+            direccion != usuarioActual.direccion || nombreTaller != usuarioActual.nombreTaller ||
+            especialidad != usuarioActual.especialidad
+        if (cambio || aniosExp.isNotBlank() || precioTxt.isNotBlank()) {
+            borrador.guardar("nombre" to nombre, "telefono" to telefono, "zona" to zona, "direccion" to direccion,
+                "taller" to nombreTaller, "especialidad" to especialidad, "anios" to aniosExp, "precio" to precioTxt)
+        }
+        if (!cambio && aniosExp.isBlank() && precioTxt.isBlank()) borrador.borrar()
+    }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -365,7 +378,15 @@ fun PantallaEditarPerfil(
                     var urlFotoFinal: String? = usuarioActual.fotoUrl.ifBlank { null }
                     if (nuevaImagenUri != null) {
                         val subida = SupabaseService.subirFotoStorage(contexto, nuevaImagenUri!!)
-                        if (subida != null) urlFotoFinal = subida
+                        if (subida != null) {
+                            urlFotoFinal = subida
+                        } else {
+                            // Antes la foto se ignoraba en silencio; ahora se avisa y se conserva todo para reintentar
+                            guardando = false
+                            mensajeError = (EstadoRed.ultimoMensaje ?: "No se pudo subir tu nueva foto.") +
+                                " Tus cambios siguen aquí: vuelve a intentarlo."
+                            return@launch
+                        }
                     }
 
                     val res = SupabaseService.actualizarPerfil(
@@ -388,7 +409,13 @@ fun PantallaEditarPerfil(
                             val anios = aniosExp.toIntOrNull() ?: 0
                             val disp = dispSel.joinToString(",")
                             val precio = precioTxt.toDoubleOrNull() ?: 0.0
-                            SupabaseService.actualizarDatosProfesionales(perfilGuardado.id, anios, disp, precio, mujeresOpt)
+                            val datosOk = SupabaseService.actualizarDatosProfesionales(perfilGuardado.id, anios, disp, precio, mujeresOpt)
+                            if (!datosOk) {
+                                guardando = false
+                                mensajeError = "Se guardaron tus datos generales, pero no los datos profesionales (experiencia, disponibilidad, precio). " +
+                                    (EstadoRed.ultimoMensaje ?: "Revisa tu conexión") + " y presiona Guardar de nuevo."
+                                return@onSuccess
+                            }
                             perfilFinal = perfilGuardado.copy(
                                 aniosExperiencia = anios, disponibilidad = disp,
                                 precioDesde = precio, visibleTalentoMujeres = mujeresOpt,
@@ -396,6 +423,7 @@ fun PantallaEditarPerfil(
                             )
                         }
                         guardando = false
+                        borrador.borrar()
                         alGuardarExitoso(perfilFinal)
                     }.onFailure {
                         guardando = false
@@ -408,7 +436,7 @@ fun PantallaEditarPerfil(
         Spacer(modifier = Modifier.height(10.dp))
 
         OutlinedButton(
-            onClick = alCancelar,
+            onClick = { borrador.borrar(); alCancelar() },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = HabilioTheme.alturaMinima(48.dp)),

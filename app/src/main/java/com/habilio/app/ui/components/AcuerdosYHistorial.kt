@@ -159,6 +159,7 @@ fun SeccionAcuerdosYHistorial(solicitud: SolicitudItem, rol: String) {
 
         // ---------------- Presupuesto ----------------
         TituloSeccion("Presupuesto acordado", Icons.Default.RequestQuote)
+        AvisoPagosHabilio()
         val aceptado = presupuestos.lastOrNull { it.estado == "aceptado" }
         val pendiente = presupuestos.lastOrNull { it.estado == "pendiente" }
         HabilioTarjeta(radioEsquina = 14.dp, paddingInterno = 14.dp) {
@@ -346,4 +347,23 @@ fun SeccionAcuerdosYHistorial(solicitud: SolicitudItem, rol: String) {
             Text(mensaje, color = HabilioTheme.RojoUrgente, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
     }
+}
+
+
+/**
+ * Aviso de pagos: Habilio NO procesa pagos. Distingue presupuesto orientativo, pago acordado y servicio concluido
+ * para que nadie interprete que la plataforma cobra, retiene o libera dinero.
+ */
+@Composable
+fun AvisoPagosHabilio() {
+    HabilioTarjeta(radioEsquina = 14.dp, paddingInterno = 12.dp) {
+        Text("Cómo funcionan los pagos", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoPrimario)
+        Spacer(Modifier.height(4.dp))
+        Text("Habilio no procesa pagos: no cobra, no retiene ni transfiere dinero.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+        Spacer(Modifier.height(4.dp))
+        Text("• Presupuesto orientativo: referencia inicial, no es un cobro.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+        Text("• Pago acordado: monto que ambas partes aceptan aquí; se paga directamente a la persona especialista.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+        Text("• Servicio concluido: se marca al confirmar el cierre del trabajo; no implica que Habilio haya recibido ni liberado dinero.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+    }
+    Spacer(Modifier.height(8.dp))
 }

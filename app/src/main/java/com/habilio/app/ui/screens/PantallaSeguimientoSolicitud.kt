@@ -90,8 +90,19 @@ fun PantallaSeguimientoSolicitud(
     alCancelarPedido: () -> Unit,
     alConfirmarCierre: () -> Unit,
     alCalificar: () -> Unit,
-    alVerPerfilTrabajador: () -> Unit
+    alVerPerfilTrabajador: () -> Unit,
+    usuarioId: String = "",
+    alReportarEspecialista: () -> Unit = {},
+    alBloquearEspecialista: () -> Unit = {},
+    alAbrirSeguridad: () -> Unit = {}
 ) {
+    // Acta #25: el teléfono de la persona especialista solo se pide y se muestra cuando el servicio fue aceptado
+    var telefonoServicio by remember(solicitud.id, solicitud.estado) { mutableStateOf("") }
+    LaunchedEffect(solicitud.id, solicitud.estado) {
+        if (puedeVerContacto(solicitud.estado) && telefonoServicio.isBlank()) {
+            telefonoServicio = SupabaseService.obtenerTelefonoParaServicio(solicitud.trabajadorId).orEmpty()
+        }
+    }
     val folioCorto = remember(solicitud.id) {
         val digitos = solicitud.id.filter { it.isDigit() }.take(4).padEnd(4, '8')
         "#HAB-$digitos"
@@ -289,8 +300,12 @@ fun PantallaSeguimientoSolicitud(
                         Column {
                             Text(solicitud.nombreTrabajador, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Text(solicitud.oficioTrabajador, fontSize = 13.sp, color = HabilioTheme.AmarilloAcentoTexto)
-                            if (!especialista?.telefono.isNullOrBlank()) {
-                                Text("📱 +52 ${especialista?.telefono}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                            if (puedeVerContacto(solicitud.estado)) {
+                                if (telefonoServicio.isNotBlank()) {
+                                    Text("📱 +52 $telefonoServicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                                }
+                            } else {
+                                Text("🔒 El teléfono se muestra cuando se acepta el servicio", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                             }
                         }
                     }
@@ -312,7 +327,7 @@ fun PantallaSeguimientoSolicitud(
 
                 Text("Ubicación de atención:", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("📍 ${solicitud.ubicacion}", fontSize = 14.sp)
+                Text("📍 ${ubicacionParaCliente(solicitud.ubicacion)}", fontSize = 14.sp)
 
                 Spacer(modifier = Modifier.height(14.dp))
                 HorizontalDivider(color = HabilioTheme.BordeTarjeta)
@@ -324,8 +339,8 @@ fun PantallaSeguimientoSolicitud(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("MONTO DE LA SOLICITUD", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
-                        Text("El monto final se acuerda en la sección de presupuesto", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                        Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
+                        Text("Monto orientativo. El monto final se acuerda en la sección de presupuesto y se paga directamente a la persona especialista (Habilio no procesa pagos).", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                     }
                     Text(
                         text = "$${String.format("%.2f", solicitud.monto)} MXN",
@@ -351,6 +366,20 @@ fun PantallaSeguimientoSolicitud(
                         }
                     }
                 }
+            }
+
+            if (usuarioId.isNotBlank() && solicitud.estado != "rechazado" && solicitud.estado != "cancelada") {
+                Spacer(modifier = Modifier.height(12.dp))
+                TarjetaSeguridadServicio(
+                    usuarioId = usuarioId,
+                    solicitud = solicitud,
+                    otraParte = solicitud.nombreTrabajador,
+                    esEspecialista = false,
+                    alReportar = alReportarEspecialista,
+                    alBloquear = alBloquearEspecialista,
+                    alAbrirCentro = alAbrirSeguridad
+                )
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             SeccionAcuerdosYHistorial(solicitud = solicitud, rol = "cliente")

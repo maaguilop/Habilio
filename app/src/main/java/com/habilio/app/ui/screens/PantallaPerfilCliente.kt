@@ -91,10 +91,12 @@ fun PantallaPerfilCliente(
     alCambiarApariencia: (String) -> Unit,
     alEditarPerfil: () -> Unit,
     alVerSeguimientoSolicitud: (SolicitudItem) -> Unit,
-    alLiberarPago: (SolicitudItem) -> Unit,
+    alConfirmarCierreServicio: (SolicitudItem) -> Unit,
     alCalificarTrabajador: (SolicitudItem) -> Unit,
     alIrAExplorar: () -> Unit,
-    alCambiarRol: () -> Unit
+    alCambiarRol: () -> Unit,
+    alAbrirSeguridad: () -> Unit = {},
+    totalBloqueados: Int = 0
 ) {
     val totalPedidos = solicitudes.size
     val totalCompletados = solicitudes.count { it.estado == "completado" }
@@ -205,6 +207,10 @@ fun PantallaPerfilCliente(
                 aparienciaActual = apariencia,
                 alCambiarApariencia = alCambiarApariencia
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            TarjetaSeguridadPerfil(totalBloqueados = totalBloqueados, alAbrirCentro = alAbrirSeguridad)
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -356,7 +362,7 @@ fun PantallaPerfilCliente(
 
                         if (!completado && !rechazado && !cancelada) {
                             Button(
-                                onClick = { alLiberarPago(sol) },
+                                onClick = { alConfirmarCierreServicio(sol) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = HabilioTheme.alturaMinima(48.dp)),

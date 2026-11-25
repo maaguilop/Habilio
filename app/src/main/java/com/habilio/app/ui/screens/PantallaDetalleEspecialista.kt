@@ -94,7 +94,9 @@ fun PantallaDetalleEspecialista(
     alClickFotoEvidencia: (EvidenciaItem) -> Unit,
     alIrAExplorar: () -> Unit,
     alIrAMiPerfil: () -> Unit,
-    alReportarResena: ((ResenaItem) -> Unit)? = null
+    alReportarResena: ((ResenaItem) -> Unit)? = null,
+    alReportarEspecialista: (() -> Unit)? = null,
+    alBloquearEspecialista: (() -> Unit)? = null
 ) {
     val tieneEvidencia = evidencias.isNotEmpty()
     val trabajos = remember(evidencias) { agruparEvidencias(evidencias) }
@@ -132,11 +134,17 @@ fun PantallaDetalleEspecialista(
                     Text("Volver al listado", color = HabilioTheme.TextoPrimario, fontSize = 14.sp)
                 }
 
-                HabilioBadge(
-                    texto = if (tieneEvidencia) "Con trabajos publicados" else "Perfil registrado",
-                    colorTexto = if (tieneEvidencia) HabilioTheme.AzulVerificado else HabilioTheme.TextoSecundario,
-                    colorFondo = if (tieneEvidencia) HabilioTheme.FondoAzulSuave else HabilioTheme.SuperficieElevada
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    HabilioBadge(
+                        texto = if (tieneEvidencia) "Con trabajos publicados" else "Perfil registrado",
+                        colorTexto = if (tieneEvidencia) HabilioTheme.AzulVerificado else HabilioTheme.TextoSecundario,
+                        colorFondo = if (tieneEvidencia) HabilioTheme.FondoAzulSuave else HabilioTheme.SuperficieElevada
+                    )
+                    // Acta #25: reportar conducta o bloquear desde el perfil
+                    if (alReportarEspecialista != null && alBloquearEspecialista != null) {
+                        MenuSeguridadUsuario(alReportar = alReportarEspecialista, alBloquear = alBloquearEspecialista)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

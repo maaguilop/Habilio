@@ -92,8 +92,15 @@ object SupabaseService {
 
     private var tokenSesionActual: String? = null
 
+    /** Se llama una vez al abrir la app: prepara la copia local que permite ver datos sin conexión. */
+    fun inicializar(context: Context) {
+        CacheLocal.iniciar(context)
+    }
+
     fun cerrarSesionToken() {
         tokenSesionActual = null
+        // Acta #24/#25: al cerrar sesión no queda en el teléfono información de la cuenta (solicitudes, direcciones)
+        CacheLocal.borrarDatosPrivados()
     }
 
     suspend fun marcarSolicitudEvaluada(solicitudId: String): Boolean =
@@ -187,11 +194,15 @@ object SupabaseService {
     suspend fun analizarImagen(context: Context, uri: Uri): InformeImagen? =
         withContext(Dispatchers.IO) { procesarImagen(context, uri)?.informe }
 
-    suspend fun subirFotoStorage(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+    /**
+     * Sube una foto. Con [nombre] el archivo tiene un nombre estable: si la subida se repite (reintento tras un
+     * corte de red) no se acumulan archivos duplicados y una foto ya subida se reutiliza.
+     */
+    suspend fun subirFotoStorage(context: Context, uri: Uri, nombre: String? = null): String? = withContext(Dispatchers.IO) {
         try {
             val bytesComprimidos = comprimirImagenJpeg(context, uri) ?: return@withContext null
 
-            val nombreArchivo = "${UUID.randomUUID()}.jpg"
+            val nombreArchivo = "${nombre ?: UUID.randomUUID().toString()}.jpg"
             val urlStorage = "$PROJECT_URL/storage/v1/object/evidencias/$nombreArchivo"
             val bearer = tokenSesionActual ?: ANON_KEY
 
@@ -202,23 +213,89 @@ object SupabaseService {
                 setRequestProperty("apikey", ANON_KEY)
                 setRequestProperty("Authorization", "Bearer $bearer")
                 setRequestProperty("Content-Type", "image/jpeg")
+                if (nombre != null) setRequestProperty("x-upsert", "true")
                 doOutput = true
             }
 
             conn.outputStream.use { it.write(bytesComprimidos) }
 
-            if (conn.responseCode in 200..299) {
-                "$PROJECT_URL/storage/v1/object/public/evidencias/$nombreArchivo"
+            val codigo = conn.responseCode
+            val urlPublica = "$PROJECT_URL/storage/v1/object/public/evidencias/$nombreArchivo"
+            if (codigo in 200..299) {
+                urlPublica
             } else {
-                null
+                val cuerpoError = conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use(BufferedReader::readText).orEmpty()
+                val yaExistia = nombre != null && (codigo == 409 ||
+                    cuerpoError.contains("Duplicate", ignoreCase = true) ||
+                    cuerpoError.contains("already exists", ignoreCase = true))
+                if (yaExistia) {
+                    urlPublica
+                } else {
+                    EstadoRed.ultimoMensaje = mensajeDeCodigoHttp(codigo, "subir la foto")
+                    null
+                }
             }
+        } catch (e: java.io.IOException) {
+            EstadoRed.registrarFallo(e)
+            null
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
 
+    /**
+     * Toda petición pasa por aquí: si falla la red o el servidor responde con error 5xx se anota en [EstadoRed]
+     * para que la app pueda avisar y ofrecer reintentar (Acta #24).
+     */
     private fun peticionHttp(
+        urlCompleta: String,
+        metodo: String = "GET",
+        cuerpoJson: String? = null,
+        preferReturn: Boolean = true
+    ): Pair<Int, String> {
+        try {
+            val r = peticionHttpSinRegistro(urlCompleta, metodo, cuerpoJson, preferReturn)
+            if (r.first >= 500) {
+                EstadoRed.registrarFallo(java.io.IOException("HTTP ${r.first}"))
+                EstadoRed.ultimoMensaje = mensajeDeCodigoHttp(r.first, "completar la operación")
+            }
+            return r
+        } catch (e: java.io.IOException) {
+            EstadoRed.registrarFallo(e)
+            throw e
+        }
+    }
+
+    /**
+     * Consulta (GET) con un reintento automático. Si no hay conexión o el servidor falla, devuelve la última copia
+     * guardada en el teléfono (y lo marca en [EstadoRed.copiaLocal]) para que la app siga siendo útil sin red.
+     * Si tampoco hay copia, lanza el error de red.
+     */
+    private fun getConCache(url: String, privado: Boolean = false, intentos: Int = 2): Pair<Int, String> {
+        var ultimoError: java.io.IOException? = null
+        for (i in 1..intentos) {
+            try {
+                val r = peticionHttp(url)
+                if (r.first >= 500) throw java.io.IOException("HTTP ${r.first}")
+                if (r.first in 200..299 && r.second.isNotBlank()) CacheLocal.guardar(url, r.second, privado)
+                return r
+            } catch (e: java.io.IOException) {
+                ultimoError = e
+                if (i < intentos) {
+                    try { Thread.sleep(600L) } catch (_: InterruptedException) { }
+                }
+            }
+        }
+        val copia = CacheLocal.leer(url, privado)
+        if (copia != null) {
+            EstadoRed.copiaLocal = true
+            return 200 to copia
+        }
+        throw ultimoError ?: java.io.IOException("Sin respuesta del servidor")
+    }
+
+    private fun peticionHttpSinRegistro(
         urlCompleta: String,
         metodo: String = "GET",
         cuerpoJson: String? = null,
@@ -471,9 +548,32 @@ object SupabaseService {
                     return@withContext Result.success(parsearPerfil(arr.getJSONObject(0)))
                 }
             }
-            Result.failure(Exception("No se pudo actualizar el perfil (Código $code)."))
+            Result.failure(Exception(mensajeDeCodigoHttp(code, "actualizar el perfil")))
         } catch (e: Exception) {
-            Result.failure(Exception("Error de red al actualizar el perfil."))
+            Result.failure(
+                Exception(
+                    if (esFalloDeRed(e)) "${mensajeDeRed(e)} Tus cambios siguen en pantalla y guardados en este teléfono: vuelve a intentarlo."
+                    else "No se pudo actualizar el perfil. Inténtalo de nuevo."
+                )
+            )
+        }
+    }
+
+    /**
+     * Recuperación de cuenta: Supabase envía un enlace de restablecimiento al correo. La respuesta al usuario
+     * es siempre la misma exista o no la cuenta, para no revelar qué correos están registrados.
+     */
+    suspend fun solicitarRecuperacionContrasena(correo: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val limpio = correo.trim().lowercase()
+            if (!limpio.contains("@") || limpio.endsWith("@habilio.app")) {
+                return@withContext Result.failure(Exception("Escribe el correo electrónico con el que registraste tu cuenta."))
+            }
+            val payload = JSONObject().apply { put("email", limpio) }
+            peticionHttp("$AUTH_URL/recover", "POST", payload.toString(), false)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(Exception("No pudimos enviar la solicitud. Revisa tu conexión e inténtalo de nuevo."))
         }
     }
 
@@ -555,16 +655,25 @@ object SupabaseService {
 
                 Result.failure(Exception("No se encontró el perfil asociado a esta cuenta."))
             } catch (e: Exception) {
-                Result.failure(Exception("Error de conexión al verificar credenciales."))
+                Result.failure(Exception(if (esFalloDeRed(e)) mensajeDeRed(e) else "No se pudieron verificar las credenciales. Inténtalo de nuevo."))
             }
         }
 
     suspend fun obtenerTrabajadores(): List<PerfilUsuario> = withContext(Dispatchers.IO) {
         try {
-            val (code, resp) = peticionHttp("$REST_URL/perfiles?rol=eq.trabajador&order=creado_en.desc")
+            // Acta #25: la lista pública NO lleva teléfono ni correo. Se usa la vista `perfiles_publicos` y, si todavía
+            // no existe en la base, la tabla de perfiles descartando esos datos. El teléfono se pide aparte y solo
+            // cuando el servicio ya fue aceptado (ver obtenerTelefonoParaServicio).
+            val deVista = try {
+                getConCache("$REST_URL/perfiles_publicos?order=creado_en.desc")
+            } catch (_: java.io.IOException) { null }
+            val (code, resp) = if (deVista != null && deVista.first in 200..299) deVista
+                else getConCache("$REST_URL/perfiles?rol=eq.trabajador&order=creado_en.desc")
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
-                return@withContext List(arr.length()) { i -> parsearPerfil(arr.getJSONObject(i)) }
+                return@withContext List(arr.length()) { i ->
+                    parsearPerfil(arr.getJSONObject(i)).copy(telefono = "", correo = "")
+                }
             }
         } catch (_: Exception) {}
         emptyList()
@@ -572,7 +681,7 @@ object SupabaseService {
 
     suspend fun obtenerEvidencias(): List<EvidenciaItem> = withContext(Dispatchers.IO) {
         try {
-            val (code, resp) = peticionHttp("$REST_URL/evidencias?order=creado_en.desc")
+            val (code, resp) = getConCache("$REST_URL/evidencias?order=creado_en.desc")
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
                 return@withContext List(arr.length()) { i ->
@@ -612,13 +721,22 @@ object SupabaseService {
         tipoServicio: String = "",
         fechaTrabajo: String = "",
         consentimientoImagenes: Boolean = false,
+        /** Identifica este trabajo. Si se reintenta con el mismo id (tras un corte de red) no se publica dos veces. */
+        grupoId: String = UUID.randomUUID().toString(),
         onProgreso: (subidas: Int, total: Int) -> Unit = { _, _ -> }
     ): Boolean = withContext(Dispatchers.IO) {
+        EstadoRed.ultimoMensaje = null
         try {
             // Acta #8: sin consentimiento de quien aparece o es dueño del lugar no se publica ninguna imagen.
             if (!consentimientoImagenes) return@withContext false
             val fotosAPublicar = fotos.take(MAX_FOTOS_POR_TRABAJO)
             if (fotosAPublicar.isEmpty()) return@withContext false
+
+            // Reintento seguro: si este trabajo ya se había publicado y solo se perdió la respuesta, no se duplica.
+            val (codigoYa, respuestaYa) = peticionHttp("$REST_URL/evidencias?grupo_id=eq.$grupoId&select=id&limit=1")
+            if (codigoYa in 200..299 && respuestaYa.isNotBlank() && JSONArray(respuestaYa).length() > 0) {
+                return@withContext true
+            }
 
             val urls = mutableListOf<Pair<String, String>>()
             onProgreso(0, fotosAPublicar.size)
@@ -627,7 +745,7 @@ object SupabaseService {
                 var url: String? = null
                 var intento = 0
                 while (url == null && intento < 3) {
-                    url = subirFotoStorage(context, foto.uri)
+                    url = subirFotoStorage(context, foto.uri, "$grupoId-$indice-${Integer.toHexString(foto.uri.toString().hashCode())}")
                     intento++
                 }
                 if (url == null) return@withContext false
@@ -635,7 +753,6 @@ object SupabaseService {
                 onProgreso(indice + 1, fotosAPublicar.size)
             }
 
-            val grupoId = UUID.randomUUID().toString()
             val lugar = ubicacion.ifBlank { "Pénjamo, Gto." }
             val filas = JSONArray()
             urls.forEach { (etiqueta, url) ->
@@ -666,12 +783,14 @@ object SupabaseService {
                 respuestaEv = peticionHttp("$REST_URL/evidencias", "POST", filasBasicas.toString())
             }
             val exito = respuestaEv.first in 200..299
+            if (!exito) EstadoRed.ultimoMensaje = mensajeDeCodigoHttp(respuestaEv.first, "publicar el trabajo")
             if (exito) {
                 val updatePayload = JSONObject().apply { put("es_premium", true) }
                 peticionHttp("$REST_URL/perfiles?id=eq.$trabajadorId", "PATCH", updatePayload.toString())
             }
             exito
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (EstadoRed.ultimoMensaje == null) EstadoRed.ultimoMensaje = mensajeDeRed(e)
             false
         }
     }
@@ -683,7 +802,7 @@ object SupabaseService {
             } else {
                 "$REST_URL/resenas?order=creado_en.desc"
             }
-            val (code, resp) = peticionHttp(query)
+            val (code, resp) = getConCache(query)
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
                 return@withContext List(arr.length()) { i ->
@@ -752,6 +871,65 @@ object SupabaseService {
         }
     }
 
+    /** Convierte una fila de `solicitudes` (recién creada o encontrada) en el modelo de la app. */
+    private fun solicitudDesdeFila(o: JSONObject, montoPorDefecto: Double) = SolicitudItem(
+        id = o.optString("id"),
+        clienteId = o.optString("cliente_id"),
+        trabajadorId = o.optString("trabajador_id"),
+        oficioEtiqueta = o.optString("oficio_etiqueta"),
+        descripcion = o.optString("descripcion"),
+        ubicacion = o.optString("ubicacion"),
+        monto = o.optDouble("monto", montoPorDefecto),
+        esUrgente = o.optBoolean("es_urgente", false),
+        estado = o.optString("estado", "pendiente"),
+        fotosProblema = fotosDeJson(o.optJSONArray("fotos_problema")),
+        creadoEn = o.optString("creado_en", "")
+    )
+
+    private fun haceMenosDeMinutos(iso: String, minutos: Long): Boolean = try {
+        val f = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val fecha = f.parse(iso.take(19))
+        fecha != null && System.currentTimeMillis() - fecha.time < minutos * 60_000L
+    } catch (_: Exception) { false }
+
+    /**
+     * Acta #24: reintentar NO debe duplicar la solicitud. Si el envío anterior sí llegó al servidor pero la
+     * respuesta se perdió, aquí se encuentra esa misma solicitud (por su clave de envío, o por ser pendiente,
+     * de la misma persona, al mismo especialista, con el mismo texto y creada hace menos de 30 minutos).
+     */
+    private fun buscarSolicitudDuplicada(
+        clienteId: String, trabajadorId: String, descripcion: String, claveEnvio: String
+    ): SolicitudItem? {
+        val url = "$REST_URL/solicitudes?cliente_id=eq.$clienteId&trabajador_id=eq.$trabajadorId" +
+            "&estado=eq.pendiente&order=creado_en.desc&limit=10"
+        val (c, r) = peticionHttp(url)
+        if (c !in 200..299 || r.isBlank()) return null
+        val arr = JSONArray(r)
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val mismaClave = claveEnvio.isNotBlank() && o.optString("id") == claveEnvio
+            val mismoContenido = o.optString("descripcion").trim() == descripcion.trim() &&
+                haceMenosDeMinutos(o.optString("creado_en"), 30)
+            if (mismaClave || mismoContenido) return solicitudDesdeFila(o, 0.0)
+        }
+        return null
+    }
+
+    /**
+     * false solo si la persona especialista bloqueó a quien solicita. A quien fue bloqueada nunca se le dice que lo
+     * fue: se le responde igual que si la persona no estuviera disponible. Si la función aún no existe en la base,
+     * se permite la solicitud.
+     */
+    private fun puedeSolicitarA(trabajadorId: String): Boolean = try {
+        val cuerpo = JSONObject().put("p_trabajador", trabajadorId).toString()
+        val (c, r) = peticionHttp("$REST_URL/rpc/puede_solicitar", "POST", cuerpo)
+        !(c in 200..299 && r.trim().equals("false", ignoreCase = true))
+    } catch (e: java.io.IOException) {
+        throw e
+    } catch (_: Exception) {
+        true
+    }
+
     suspend fun crearSolicitud(
         clienteId: String,
         trabajadorId: String,
@@ -760,17 +938,28 @@ object SupabaseService {
         ubicacion: String,
         monto: Double,
         esUrgente: Boolean = false,
-        fotosProblema: List<String> = emptyList()
+        fotosProblema: List<String> = emptyList(),
+        /** Identifica este envío. Mientras no cambie el contenido, reintentar usa la misma clave y no duplica. */
+        claveEnvio: String = ""
     ): Result<SolicitudItem> = withContext(Dispatchers.IO) {
         try {
             // Acta #10: datos mínimos obligatorios, validados también aquí (no solo en la pantalla).
             if (descripcion.trim().length < 15) {
                 return@withContext Result.failure(Exception("Describe el problema con al menos 15 caracteres."))
             }
-            if (ubicacion.trim().length < 5) {
+            if (ubicacionZona(ubicacion).length < 3) {
                 return@withContext Result.failure(Exception("Indica la dirección o colonia donde se hará el trabajo."))
             }
+            // Acta #25: una persona bloqueada no puede enviar solicitudes a quien la bloqueó.
+            if (!puedeSolicitarA(trabajadorId)) {
+                return@withContext Result.failure(Exception("Esta persona no está disponible para recibir tu solicitud."))
+            }
+            // Acta #24: si el envío anterior sí llegó, se devuelve esa misma solicitud en lugar de crear otra.
+            buscarSolicitudDuplicada(clienteId, trabajadorId, descripcion, claveEnvio)?.let {
+                return@withContext Result.success(it)
+            }
             val payload = JSONObject().apply {
+                if (claveEnvio.isNotBlank()) put("id", claveEnvio)
                 put("cliente_id", clienteId)
                 put("trabajador_id", trabajadorId)
                 put("oficio_etiqueta", oficioEtiqueta)
@@ -787,30 +976,31 @@ object SupabaseService {
                 val r2 = peticionHttp("$REST_URL/solicitudes", "POST", payload.toString())
                 code = r2.first; resp = r2.second
             }
+            if (code == 400 && payload.has("id")) {
+                // La columna id no acepta una clave del teléfono: se envía sin ella (el control de duplicados sigue activo).
+                payload.remove("id")
+                val r3 = peticionHttp("$REST_URL/solicitudes", "POST", payload.toString())
+                code = r3.first; resp = r3.second
+            }
+            if (code == 409) {
+                buscarSolicitudDuplicada(clienteId, trabajadorId, descripcion, claveEnvio)?.let {
+                    return@withContext Result.success(it)
+                }
+            }
             if (code in 200..299 && resp.isNotBlank()) {
                 val arr = JSONArray(resp)
                 if (arr.length() > 0) {
-                    val o = arr.getJSONObject(0)
-                    return@withContext Result.success(
-                        SolicitudItem(
-                            id = o.optString("id"),
-                            clienteId = o.optString("cliente_id"),
-                            trabajadorId = o.optString("trabajador_id"),
-                            oficioEtiqueta = o.optString("oficio_etiqueta"),
-                            descripcion = o.optString("descripcion"),
-                            ubicacion = o.optString("ubicacion"),
-                            monto = o.optDouble("monto", monto),
-                            esUrgente = o.optBoolean("es_urgente", false),
-                            estado = o.optString("estado", "pendiente"),
-                            fotosProblema = fotosDeJson(o.optJSONArray("fotos_problema")),
-                            creadoEn = o.optString("creado_en", "")
-                        )
-                    )
+                    return@withContext Result.success(solicitudDesdeFila(arr.getJSONObject(0), monto))
                 }
             }
-            Result.failure(Exception("No se pudo crear la solicitud: $resp"))
+            Result.failure(Exception(mensajeDeCodigoHttp(code, "enviar la solicitud")))
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(
+                Exception(
+                    if (esFalloDeRed(e)) "${mensajeDeRed(e)} Tu solicitud sigue guardada en este teléfono: vuelve a intentarlo."
+                    else (e.message ?: "No se pudo enviar la solicitud.")
+                )
+            )
         }
     }
 
@@ -818,8 +1008,8 @@ object SupabaseService {
         withContext(Dispatchers.IO) {
             try {
                 val campoFiltro = if (esTrabajador) "trabajador_id" else "cliente_id"
-                val (code, resp) = peticionHttp("$REST_URL/solicitudes?$campoFiltro=eq.$usuarioId&order=creado_en.desc")
-                val (codePerfiles, respPerfiles) = peticionHttp("$REST_URL/perfiles?select=id,nombre,oficio")
+                val (code, resp) = getConCache("$REST_URL/solicitudes?$campoFiltro=eq.$usuarioId&order=creado_en.desc", privado = true)
+                val (codePerfiles, respPerfiles) = getConCache("$REST_URL/perfiles?select=id,nombre,oficio")
 
                 val mapaNombres = mutableMapOf<String, Pair<String, String>>()
                 if (codePerfiles in 200..299 && respPerfiles.isNotBlank()) {
@@ -958,21 +1148,36 @@ object SupabaseService {
     private fun fotosDeJson(arr: JSONArray?): List<String> =
         if (arr == null) emptyList() else List(arr.length()) { arr.optString(it) }.filter { it.startsWith("http") }
 
-    /** Sube las fotos del problema (máx. 3), con 3 reintentos por foto. Devuelve las URLs o null si alguna falla. */
-    suspend fun subirFotosProblema(context: Context, uris: List<Uri>, onProgreso: (Int, Int) -> Unit = { _, _ -> }): List<String>? =
-        withContext(Dispatchers.IO) {
-            val urls = mutableListOf<String>()
-            val lista = uris.take(3)
-            onProgreso(0, lista.size)
-            for ((i, uri) in lista.withIndex()) {
-                var url: String? = null
-                var intento = 0
-                while (url == null && intento < 3) { url = subirFotoStorage(context, uri); intento++ }
-                urls.add(url ?: return@withContext null)
-                onProgreso(i + 1, lista.size)
+    /**
+     * Sube las fotos del problema (máx. 3), con 3 reintentos por foto. Devuelve las URLs o null si alguna falla.
+     * [yaSubidas] recuerda qué fotos ya se subieron: al reintentar solo se suben las que faltan.
+     */
+    suspend fun subirFotosProblema(
+        context: Context,
+        uris: List<Uri>,
+        yaSubidas: MutableMap<String, String> = mutableMapOf(),
+        prefijo: String = "",
+        onProgreso: (Int, Int) -> Unit = { _, _ -> }
+    ): List<String>? = withContext(Dispatchers.IO) {
+        val urls = mutableListOf<String>()
+        val lista = uris.take(3)
+        onProgreso(0, lista.size)
+        for ((i, uri) in lista.withIndex()) {
+            val clave = uri.toString()
+            var url: String? = yaSubidas[clave]
+            var intento = 0
+            while (url == null && intento < 3) {
+                val nombre = if (prefijo.isBlank()) null else "$prefijo-${Integer.toHexString(clave.hashCode())}"
+                url = subirFotoStorage(context, uri, nombre)
+                intento++
             }
-            urls
+            if (url == null) return@withContext null
+            yaSubidas[clave] = url
+            urls.add(url)
+            onProgreso(i + 1, lista.size)
         }
+        urls
+    }
 
     // ------------------------------------------------------------------------
     // ACTA #12 y #13: HISTORIAL DE EVENTOS Y AVISOS DENTRO DE LA APP
@@ -1294,5 +1499,138 @@ object SupabaseService {
             }
             r.first in 200..299
         } catch (_: Exception) { false }
+    }
+
+    // ------------------------------------------------------------------------
+    // ACTA #25: CONFIANZA Y SEGURIDAD (reportes de conducta, bloqueos y teléfono protegido)
+    // ------------------------------------------------------------------------
+    /** Ids de las personas que [usuarioId] bloqueó según el servidor; null si no se pudo consultar. */
+    suspend fun obtenerBloqueosServidor(usuarioId: String): List<String>? = withContext(Dispatchers.IO) {
+        try {
+            val (c, r) = peticionHttp("$REST_URL/bloqueos?bloqueador_id=eq.$usuarioId&select=bloqueado_id")
+            if (c in 200..299 && r.isNotBlank()) {
+                val a = JSONArray(r)
+                List(a.length()) { a.getJSONObject(it).optString("bloqueado_id") }.filter { it.isNotBlank() }
+            } else null
+        } catch (_: Exception) { null }
+    }
+
+    private fun enviarBloqueo(bloqueadorId: String, bloqueadoId: String): Boolean {
+        val p = JSONObject().put("bloqueador_id", bloqueadorId).put("bloqueado_id", bloqueadoId)
+        val (c, _) = peticionHttp("$REST_URL/bloqueos", "POST", p.toString())
+        return c in 200..299 || c == 409 // 409: ya estaba bloqueada
+    }
+
+    private fun enviarDesbloqueo(bloqueadorId: String, bloqueadoId: String): Boolean {
+        val (c, _) = peticionHttp(
+            "$REST_URL/bloqueos?bloqueador_id=eq.$bloqueadorId&bloqueado_id=eq.$bloqueadoId", "DELETE"
+        )
+        return c in 200..299
+    }
+
+    private fun enviarReporteConducta(op: JSONObject): Boolean {
+        val p = JSONObject().apply {
+            put("reportante_id", op.optString("usuario"))
+            put("reportado_id", op.optString("reportado"))
+            val solicitud = op.optString("solicitud")
+            if (solicitud.isNotBlank()) put("solicitud_id", solicitud)
+            put("rol_reportado", op.optString("rolReportado"))
+            put("motivo", op.optString("motivo"))
+            put("detalle", op.optString("detalle"))
+            put("estado", "pendiente")
+        }
+        val (c, _) = peticionHttp("$REST_URL/reportes_conducta", "POST", p.toString())
+        return c in 200..299
+    }
+
+    /** Envía el bloqueo al servidor. Si no se puede (sin conexión), queda en cola y se reintenta solo. */
+    suspend fun bloquearUsuario(context: Context, bloqueadorId: String, bloqueadoId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val ok = try { enviarBloqueo(bloqueadorId, bloqueadoId) } catch (_: Exception) { false }
+            if (!ok) {
+                ColaPendientes.agregar(
+                    context,
+                    JSONObject().put("tipo", "bloquear").put("usuario", bloqueadorId).put("bloqueado", bloqueadoId)
+                )
+            }
+            ok
+        }
+
+    suspend fun desbloquearUsuario(context: Context, bloqueadorId: String, bloqueadoId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val ok = try { enviarDesbloqueo(bloqueadorId, bloqueadoId) } catch (_: Exception) { false }
+            if (!ok) {
+                ColaPendientes.agregar(
+                    context,
+                    JSONObject().put("tipo", "desbloquear").put("usuario", bloqueadorId).put("bloqueado", bloqueadoId)
+                )
+            }
+            ok
+        }
+
+    /**
+     * Reporta una conducta inapropiada. Devuelve true si ya llegó al equipo de Habilio; false si quedó guardado
+     * en el teléfono para enviarse automáticamente cuando haya conexión (un reporte nunca se pierde).
+     */
+    suspend fun reportarConducta(
+        context: Context, reportanteId: String, objetivo: ObjetivoReporte, motivo: String, detalle: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val op = JSONObject()
+            .put("tipo", "reporte")
+            .put("usuario", reportanteId)
+            .put("reportado", objetivo.usuarioId)
+            .put("solicitud", objetivo.solicitudId)
+            .put("rolReportado", if (objetivo.esEspecialista) "trabajador" else "cliente")
+            .put("motivo", motivo)
+            .put("detalle", detalle.trim())
+        val ok = try { enviarReporteConducta(op) } catch (_: Exception) { false }
+        if (!ok) ColaPendientes.agregar(context, op)
+        ok
+    }
+
+    /** Reintenta lo que quedó pendiente de la cuenta actual. Devuelve cuántas operaciones se enviaron. */
+    suspend fun reenviarPendientesSeguridad(context: Context, usuarioId: String): Int = withContext(Dispatchers.IO) {
+        val cola = ColaPendientes.leer(context)
+        if (cola.none { it.optString("usuario") == usuarioId }) return@withContext 0
+        var enviados = 0
+        val restantes = cola.filter { op ->
+            if (op.optString("usuario") != usuarioId) return@filter true
+            val ok = try {
+                when (op.optString("tipo")) {
+                    "reporte" -> enviarReporteConducta(op)
+                    "bloquear" -> enviarBloqueo(usuarioId, op.optString("bloqueado"))
+                    "desbloquear" -> enviarDesbloqueo(usuarioId, op.optString("bloqueado"))
+                    else -> true
+                }
+            } catch (_: Exception) { false }
+            if (ok) enviados++
+            !ok
+        }
+        ColaPendientes.reemplazar(context, restantes)
+        enviados
+    }
+
+    /**
+     * Teléfono de la persona especialista, solo para una solicitud ya aceptada. Primero se pide a la función
+     * segura del servidor `telefono_de_servicio`, que comprueba que exista ese servicio aceptado; si todavía no
+     * existe en la base, se consulta el perfil directamente (la pantalla igualmente solo lo pide tras la aceptación).
+     */
+    suspend fun obtenerTelefonoParaServicio(trabajadorId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val cuerpo = JSONObject().put("p_trabajador", trabajadorId).toString()
+            val (c, r) = peticionHttp("$REST_URL/rpc/telefono_de_servicio", "POST", cuerpo)
+            if (c in 200..299) {
+                val t = r.trim().trim('"')
+                return@withContext t.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            }
+            if (c == 404) {
+                val (c2, r2) = peticionHttp("$REST_URL/perfiles?id=eq.$trabajadorId&select=telefono")
+                if (c2 in 200..299 && r2.isNotBlank()) {
+                    val a = JSONArray(r2)
+                    if (a.length() > 0) return@withContext limpiarUrlJson(a.getJSONObject(0), "telefono")
+                }
+            }
+            null
+        } catch (_: Exception) { null }
     }
 }

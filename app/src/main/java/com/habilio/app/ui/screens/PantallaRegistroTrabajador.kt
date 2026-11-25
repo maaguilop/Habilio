@@ -159,7 +159,7 @@ fun PantallaRegistroTrabajador(
                 !(esMenorConAutorizacion && oficioSeleccionado in OFICIOS_DE_RIESGO)
         2 -> zonaServicio.isNotBlank()
         3 -> nombre.isNotBlank() && telefono.filter { it.isDigit() }.length >= 10
-        4 -> contrasena.length >= 6 && aceptaTerminosYEdad
+        4 -> contrasenaValida(contrasena) && aceptaTerminosYEdad
         else -> false
     }
 
@@ -541,7 +541,7 @@ fun PantallaRegistroTrabajador(
 
                             HabilioCampoTexto(
                                 etiqueta = "Crea una contraseña",
-                                etiquetaDerecha = "Mín. 6 caracteres",
+                                etiquetaDerecha = "Mín. 8, letras y números",
                                 colorEtiquetaDerecha = HabilioTheme.VerdeExito,
                                 valor = contrasena,
                                 alCambiarValor = { contrasena = it },

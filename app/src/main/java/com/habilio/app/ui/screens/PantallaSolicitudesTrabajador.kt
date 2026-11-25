@@ -89,7 +89,11 @@ fun PantallaSolicitudesTrabajador(
     alRefrescar: () -> Unit,
     alCambiarEstadoSolicitud: (solicitud: SolicitudItem, nuevoEstado: String) -> Unit,
     alIrAMiTaller: () -> Unit,
-    alCambiarRol: () -> Unit
+    alCambiarRol: () -> Unit,
+    usuarioId: String = "",
+    alReportarCliente: (SolicitudItem) -> Unit = {},
+    alBloquearCliente: (SolicitudItem) -> Unit = {},
+    alAbrirSeguridad: () -> Unit = {}
 ) {
     var filtroSeleccionado by remember { mutableStateOf("Todas") }
     val pendientesCount = solicitudes.count { it.estado == "pendiente" }
@@ -238,6 +242,19 @@ fun PantallaSolicitudesTrabajador(
                         }
                     }
                     if (verAcuerdos) DialogoAcuerdos(sol, "trabajador") { verAcuerdos = false }
+                    // Acta #25: seguridad del servicio (reportar, bloquear, aviso a contacto de confianza, 911)
+                    if (usuarioId.isNotBlank() && sol.estado != "rechazado" && sol.estado != "cancelada" && sol.estado != "completado") {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TarjetaSeguridadServicio(
+                            usuarioId = usuarioId,
+                            solicitud = sol,
+                            otraParte = sol.nombreCliente,
+                            esEspecialista = true,
+                            alReportar = { alReportarCliente(sol) },
+                            alBloquear = { alBloquearCliente(sol) },
+                            alAbrirCentro = alAbrirSeguridad
+                        )
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
@@ -265,7 +282,7 @@ fun TarjetaSolicitudNueva(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("📍 ${solicitud.ubicacion}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 }
             }
 
@@ -403,7 +420,7 @@ fun TarjetaSolicitudEnEjecucion(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(solicitud.nombreCliente, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("📍 ${solicitud.ubicacion}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                    Text("📍 ${ubicacionParaEspecialista(solicitud)}", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 }
             }
 

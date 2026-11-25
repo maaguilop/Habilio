@@ -21,8 +21,9 @@ android {
 
     buildTypes {
         release {
+            isDebuggable = false
             optimization {
-                enable = false
+                enable = true
             }
         }
     }

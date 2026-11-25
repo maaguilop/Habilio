@@ -94,6 +94,17 @@ fun PantallaLoginUnificada(
     var contrasena by remember { mutableStateOf("") }
     var cargando by remember { mutableStateOf(false) }
     var mensajeError by remember { mutableStateOf<String?>(null) }
+    var mensajeInfo by remember { mutableStateOf<String?>(null) }
+    var segundosBloqueo by remember { mutableIntStateOf(LimitadorIntentosLogin.segundosRestantes()) }
+
+    // Cuenta regresiva mientras el inicio de sesión esté bloqueado por demasiados intentos fallidos.
+    LaunchedEffect(segundosBloqueo > 0) {
+        while (LimitadorIntentosLogin.segundosRestantes() > 0) {
+            segundosBloqueo = LimitadorIntentosLogin.segundosRestantes()
+            kotlinx.coroutines.delay(1000)
+        }
+        segundosBloqueo = 0
+    }
 
     Column(
         modifier = Modifier
@@ -143,8 +154,45 @@ fun PantallaLoginUnificada(
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(mensajeError!!, color = HabilioTheme.RojoUrgente, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
+            if (segundosBloqueo > 0) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    "Demasiados intentos fallidos. Por seguridad, espera $segundosBloqueo s para volver a intentarlo.",
+                    color = HabilioTheme.RojoUrgente, fontSize = 13.sp, fontWeight = FontWeight.Medium
+                )
+            }
+            if (mensajeInfo != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(mensajeInfo!!, color = HabilioTheme.VerdeExito, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
 
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "¿Olvidaste tu contraseña?",
+                color = HabilioTheme.AzulVerificado,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .heightIn(min = HabilioTheme.alturaMinima(48.dp))
+                    .clickable(enabled = !cargando) {
+                        mensajeError = null
+                        mensajeInfo = null
+                        if (!telefonoOCorreo.contains("@")) {
+                            mensajeError = "Escribe arriba el correo con el que te registraste y vuelve a tocar \"¿Olvidaste tu contraseña?\"."
+                        } else {
+                            cargando = true
+                            scope.launch {
+                                val res = SupabaseService.solicitarRecuperacionContrasena(telefonoOCorreo)
+                                cargando = false
+                                res.onSuccess {
+                                    mensajeInfo = "Si ese correo tiene una cuenta, te enviamos un enlace para restablecer tu contraseña."
+                                }.onFailure { mensajeError = it.message }
+                            }
+                        }
+                    }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             val textoBoton = if (cargando) {
                 "Verificando credenciales..."
@@ -156,14 +204,24 @@ fun PantallaLoginUnificada(
 
             BotonPrimarioHabilio(
                 texto = textoBoton,
-                habilitado = !cargando && telefonoOCorreo.isNotBlank() && contrasena.isNotBlank(),
+                habilitado = !cargando && segundosBloqueo == 0 && telefonoOCorreo.isNotBlank() && contrasena.isNotBlank(),
                 alClick = {
+                    if (LimitadorIntentosLogin.segundosRestantes() > 0) {
+                        segundosBloqueo = LimitadorIntentosLogin.segundosRestantes()
+                        return@BotonPrimarioHabilio
+                    }
                     cargando = true
                     mensajeError = null
+                    mensajeInfo = null
                     scope.launch {
                         val res = SupabaseService.iniciarSesion(telefonoOCorreo, contrasena)
                         cargando = false
-                        res.onSuccess(alLoginExitoso).onFailure {
+                        res.onSuccess {
+                            LimitadorIntentosLogin.registrarExito()
+                            alLoginExitoso(it)
+                        }.onFailure {
+                            LimitadorIntentosLogin.registrarFallo()
+                            segundosBloqueo = LimitadorIntentosLogin.segundosRestantes()
                             mensajeError = it.message ?: "Error al iniciar sesión"
                         }
                     }

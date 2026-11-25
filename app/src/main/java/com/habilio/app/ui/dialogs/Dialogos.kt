@@ -85,6 +85,7 @@ import kotlin.math.max
 fun ModalSolicitarServicio(
     trabajador: PerfilUsuario,
     direccionInicial: String,
+    claveBorrador: String = "",
     enviando: Boolean,
     mensajeEnvio: String,
     alCerrar: () -> Unit,
@@ -92,10 +93,21 @@ fun ModalSolicitarServicio(
 ) {
     // Acta #10: datos mínimos obligatorios + confirmación explícita antes de enviar + fotos del problema.
     var paso by remember { mutableIntStateOf(0) }
-    var descripcion by remember { mutableStateOf("") }
-    var ubicacion by remember { mutableStateOf(direccionInicial) }
-    var presupuestoTexto by remember { mutableStateOf("") }
-    var esUrgente by remember { mutableStateOf(false) }
+    // Acta #24: borrador local. Lo escrito se conserva si falla la conexión o se cierra la app (las fotos no).
+    val contextoModal = androidx.compose.ui.platform.LocalContext.current
+    val borrador = remember(claveBorrador) {
+        if (claveBorrador.isBlank()) null else BorradorLocal(contextoModal, "solicitud.$claveBorrador")
+    }
+    val hayBorradorRecuperado = remember(claveBorrador) { borrador?.existe() == true }
+    var borradorDescartado by remember { mutableStateOf(false) }
+    var descripcion by remember { mutableStateOf(borrador?.leer("descripcion") ?: "") }
+    // Privacidad: la zona es visible para la persona especialista; la dirección exacta es opcional y solo se
+    // comparte después de que acepte el trabajo.
+    var ubicacion by remember { mutableStateOf(borrador?.leer("ubicacion") ?: ubicacionZona(direccionInicial)) }
+    var direccionExacta by remember { mutableStateOf(borrador?.leer("direccion") ?: ubicacionExacta(direccionInicial)) }
+    var compartirDireccionExacta by remember { mutableStateOf(borrador?.leerBool("compartir", true) ?: true) }
+    var presupuestoTexto by remember { mutableStateOf(borrador?.leer("presupuesto") ?: "") }
+    var esUrgente by remember { mutableStateOf(borrador?.leerBool("urgente", false) ?: false) }
     var confirmo by remember { mutableStateOf(false) }
     var intentoAvanzar by remember { mutableStateOf(false) }
     val fotos = remember { mutableStateListOf<Uri>() }
@@ -106,8 +118,21 @@ fun ModalSolicitarServicio(
         uris.forEach { if (fotos.size < 3 && it !in fotos) fotos.add(it) }
     }
 
+    LaunchedEffect(descripcion, ubicacion, direccionExacta, compartirDireccionExacta, presupuestoTexto, esUrgente) {
+        if (borrador != null) {
+            if (descripcion.isNotBlank()) {
+                borrador.guardar(
+                    "descripcion" to descripcion, "ubicacion" to ubicacion, "direccion" to direccionExacta,
+                    "compartir" to compartirDireccionExacta, "presupuesto" to presupuestoTexto, "urgente" to esUrgente
+                )
+            } else borrador.borrar()
+        }
+    }
+
     val descripcionOk = descripcion.trim().length >= 15
-    val ubicacionOk = ubicacion.trim().length >= 5
+    val ubicacionOk = ubicacion.trim().length >= 3
+    val hayErrorEnvio = mensajeEnvio.isNotBlank() && !enviando &&
+        !mensajeEnvio.startsWith("Subiendo") && !mensajeEnvio.startsWith("Enviando")
     val montoIngresado = presupuestoTexto.replace(",", "").toDoubleOrNull()
     val montoOk = presupuestoTexto.isBlank() || (montoIngresado != null && montoIngresado > 0)
     val formularioValido = descripcionOk && ubicacionOk && montoOk
@@ -152,6 +177,18 @@ fun ModalSolicitarServicio(
             Spacer(Modifier.height(16.dp))
 
             if (paso == 0) {
+                if (hayBorradorRecuperado && !borradorDescartado) {
+                    HabilioTarjeta(colorFondo = HabilioTheme.FondoAzulSuave, radioEsquina = 12.dp, paddingInterno = 10.dp) {
+                        Text("Recuperamos tu borrador. Las fotos hay que agregarlas de nuevo.", fontSize = 12.sp, color = HabilioTheme.TextoPrimario)
+                        TextButton(onClick = {
+                            borradorDescartado = true
+                            descripcion = ""; presupuestoTexto = ""; esUrgente = false
+                            ubicacion = ubicacionZona(direccionInicial); direccionExacta = ubicacionExacta(direccionInicial)
+                            borrador?.borrar()
+                        }) { Text("Descartar borrador", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AzulVerificado) }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
                 Text("Describe qué necesitas *", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text("Ejemplo: \"Gotea la llave de la cocina y el piso se está mojando\"", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 Spacer(Modifier.height(6.dp))
@@ -168,20 +205,43 @@ fun ModalSolicitarServicio(
                     }
                 )
 
+                AvisoDatosDeContacto(descripcion)
                 Spacer(Modifier.height(8.dp))
-                Text("¿Dónde se hará el trabajo? *", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("¿En qué zona se hará el trabajo? *", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Solo esta zona general es visible para la persona especialista antes de que acepte.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
-                    value = ubicacion, onValueChange = { ubicacion = it },
+                    value = ubicacion, onValueChange = { ubicacion = it.replace(SEPARADOR_UBICACION, "") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
                     shape = RoundedCornerShape(12.dp), colors = coloresInputHabilio(),
+                    placeholder = { Text("Colonia o zona (sin calle ni número)") },
                     isError = intentoAvanzar && !ubicacionOk,
-                    supportingText = { if (intentoAvanzar && !ubicacionOk) Text("Indica calle y colonia") }
+                    supportingText = { if (intentoAvanzar && !ubicacionOk) Text("Indica la colonia o zona") }
                 )
 
                 Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp)).clickable { compartirDireccionExacta = !compartirDireccionExacta }
+                ) {
+                    Switch(checked = compartirDireccionExacta, onCheckedChange = { compartirDireccionExacta = it })
+                    Spacer(Modifier.width(10.dp))
+                    Text("Compartir mi dirección exacta, solo cuando la persona especialista acepte el trabajo", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                }
+                if (compartirDireccionExacta) {
+                    OutlinedTextField(
+                        value = direccionExacta, onValueChange = { direccionExacta = it.replace(SEPARADOR_UBICACION, "") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        shape = RoundedCornerShape(12.dp), colors = coloresInputHabilio(),
+                        placeholder = { Text("Calle y número (opcional)") }
+                    )
+                } else {
+                    Text("No se compartirá tu dirección exacta; podrán acordarla por otro medio si lo decides.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                }
+
+                Spacer(Modifier.height(8.dp))
                 Text("Presupuesto orientativo (opcional)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text("Es solo una referencia. El monto final se acuerda con la persona especialista dentro de la solicitud.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
+                Text("Es solo una referencia, no es un cobro. Habilio no procesa pagos: el monto final y la forma de pago se acuerdan directamente con la persona especialista.", fontSize = 12.sp, color = HabilioTheme.TextoSecundario)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = presupuestoTexto, onValueChange = { presupuestoTexto = it },
@@ -253,10 +313,16 @@ fun ModalSolicitarServicio(
                     }
                 }
                 Dato("Trabajo solicitado", descripcion.trim())
-                Dato("Lugar", ubicacion.trim())
+                Dato("Zona", ubicacion.trim())
+                if (compartirDireccionExacta && direccionExacta.isNotBlank()) Dato("Dirección exacta", "${direccionExacta.trim()} (se comparte al aceptar el trabajo)")
                 Dato("Presupuesto orientativo", if (montoFinal > 0) "$${"%.2f".format(montoFinal)} MXN" else "Por cotizar")
                 Dato("Urgencia", if (esUrgente) "Urgente" else "Sin urgencia")
                 Dato("Fotos adjuntas", if (fotos.isEmpty()) "Ninguna" else "${fotos.size}")
+                Text(
+                    "Seguridad: avisa a una persona de confianza que recibirás a alguien en tu domicilio y, si puedes, procura no estar sola. Puedes reportar o bloquear desde el servicio.",
+                    fontSize = 12.sp, lineHeight = 16.sp, color = HabilioTheme.TextoSecundario,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
 
                 Spacer(Modifier.height(10.dp))
                 Row(
@@ -272,16 +338,22 @@ fun ModalSolicitarServicio(
                     )
                 }
 
+                if (!EstadoRed.hayRed) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Sin conexión: tu solicitud queda guardada en este teléfono. Podrás enviarla cuando vuelva la señal.",
+                        fontSize = 13.sp, color = HabilioTheme.RojoUrgente)
+                }
                 if (mensajeEnvio.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    Text(mensajeEnvio, fontSize = 13.sp, color = HabilioTheme.TextoSecundario)
+                    Text(mensajeEnvio, fontSize = 13.sp,
+                        color = if (hayErrorEnvio) HabilioTheme.RojoUrgente else HabilioTheme.TextoSecundario)
                 }
 
                 Spacer(Modifier.height(14.dp))
                 BotonPrimarioHabilio(
-                    texto = if (enviando) "Enviando…" else "Enviar solicitud",
+                    texto = if (enviando) "Enviando…" else if (hayErrorEnvio) "Reintentar envío" else "Enviar solicitud",
                     habilitado = confirmo && !enviando,
-                    alClick = { alConfirmarSolicitud(descripcion.trim(), ubicacion.trim(), montoFinal, esUrgente, fotos.toList()) }
+                    alClick = { alConfirmarSolicitud(descripcion.trim(), armarUbicacionSolicitud(ubicacion, direccionExacta, compartirDireccionExacta), montoFinal, esUrgente, fotos.toList()) }
                 )
                 TextButton(onClick = { paso = 0 }, enabled = !enviando, modifier = Modifier.fillMaxWidth()) {
                     Text("Corregir datos", color = HabilioTheme.TextoSecundario)
@@ -422,7 +494,7 @@ fun ModalSolicitudConfirmada(
                             )
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("MONTO DE LA SOLICITUD", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
+                            Text("MONTO ORIENTATIVO", fontSize = 11.sp, color = HabilioTheme.TextoSecundario, fontWeight = FontWeight.Bold)
                             Text(
                                 text = "$${String.format("%.2f", solicitud.monto)} MXN",
                                 fontSize = 16.sp,
@@ -446,7 +518,7 @@ fun ModalSolicitudConfirmada(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "El pago se realiza directamente a la persona especialista al confirmar el trabajo",
+                            text = "Habilio no procesa pagos. El pago se acuerda y se realiza directamente con la persona especialista; el monto mostrado es solo orientativo.",
                             fontSize = 12.sp,
                             color = HabilioTheme.TextoSecundario
                         )

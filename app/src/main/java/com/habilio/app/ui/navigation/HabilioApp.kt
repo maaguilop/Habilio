@@ -101,6 +101,9 @@ fun HabilioApp() {
     val contexto = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // Acta #24: escucha los cambios de red para mostrar el estado de conexión
+    MonitorDeConexion()
+
     // Preferencia persistente del tamaño de texto para ambos modos
     val prefs = remember(contexto) {
         contexto.getSharedPreferences(AppConfig.PREFS_NAME, Context.MODE_PRIVATE)
@@ -172,34 +175,139 @@ fun HabilioApp() {
     // Acta #14: reseña que se va a reportar
     var resenaAReportar by remember { mutableStateOf<ResenaItem?>(null) }
 
+    // Acta #24: estado de las consultas y envíos que no deben duplicarse al reintentar
+    var falloCarga by remember { mutableStateOf(false) }
+    var conexionRestablecida by remember { mutableStateOf(false) }
+    var estuvoSinRed by remember { mutableStateOf(false) }
+    val claveSolicitud = remember { ClaveIdempotente() }
+    val fotosProblemaSubidas = remember { mutableMapOf<String, String>() }
+    val clavePublicacion = remember { ClaveIdempotente() }
+
+    // Acta #25: personas bloqueadas, reportes de conducta y centro de seguridad
+    var bloqueados by remember { mutableStateOf<List<UsuarioBloqueado>>(emptyList()) }
+    var reporteObjetivo by remember { mutableStateOf<ObjetivoReporte?>(null) }
+    var bloqueoObjetivo by remember { mutableStateOf<ObjetivoReporte?>(null) }
+    var mostrarCentroSeguridad by remember { mutableStateOf(false) }
+
+    fun mostrarAviso(texto: String) {
+        android.widget.Toast.makeText(contexto, texto, android.widget.Toast.LENGTH_LONG).show()
+    }
+
     fun recargarDatosGlobales() {
         scope.launch {
             cargandoDatos = true
-            listaTrabajadores = SupabaseService.obtenerTrabajadores()
-            todasLasEvidencias = SupabaseService.obtenerEvidencias()
-            todasLasResenas = SupabaseService.obtenerResenas()
+            EstadoRed.iniciarCiclo()
+            val fallosAlInicio = EstadoRed.fallos
+            // Los bloqueos guardados en el teléfono se aplican de inmediato, sin esperar a la red
+            usuarioActual?.let { bloqueados = BloqueosLocales.leer(contexto, it.id) }
+
+            // Acta #24: si una consulta falla NO se reemplaza lo que ya había en pantalla por una lista vacía
+            val trabajadores = SupabaseService.obtenerTrabajadores()
+            if (trabajadores.isNotEmpty() || EstadoRed.fallos == fallosAlInicio) listaTrabajadores = trabajadores
+            val evidencias = SupabaseService.obtenerEvidencias()
+            if (evidencias.isNotEmpty() || EstadoRed.fallos == fallosAlInicio) todasLasEvidencias = evidencias
+            val resenas = SupabaseService.obtenerResenas()
+            if (resenas.isNotEmpty() || EstadoRed.fallos == fallosAlInicio) todasLasResenas = resenas
             usuarioActual?.let { user ->
-                solicitudesUsuario = SupabaseService.obtenerSolicitudesUsuario(
+                val solicitudes = SupabaseService.obtenerSolicitudesUsuario(
                     usuarioId = user.id,
                     esTrabajador = user.rol == "trabajador"
                 )
+                if (solicitudes.isNotEmpty() || EstadoRed.fallos == fallosAlInicio) solicitudesUsuario = solicitudes
                 trabajadorSeleccionado?.let { sel ->
                     trabajadorSeleccionado = listaTrabajadores.find { it.id == sel.id } ?: sel
                 }
                 solicitudEnSeguimiento?.let { seg ->
                     solicitudEnSeguimiento = solicitudesUsuario.find { it.id == seg.id } ?: seg
                 }
-                avisosPendientes = SupabaseService.obtenerAvisosPendientes(user.id)
+                val avisos = SupabaseService.obtenerAvisosPendientes(user.id)
+                if (avisos.isNotEmpty() || EstadoRed.fallos == fallosAlInicio) avisosPendientes = avisos
+            }
+            falloCarga = EstadoRed.fallos != fallosAlInicio
+
+            // Acta #25: reintenta reportes y bloqueos que no se pudieron enviar y suma los bloqueos del servidor
+            usuarioActual?.let { user ->
+                SupabaseService.reenviarPendientesSeguridad(contexto, user.id)
+                val delServidor = SupabaseService.obtenerBloqueosServidor(user.id)
+                bloqueados = if (delServidor != null) {
+                    BloqueosLocales.unirConServidor(
+                        contexto, user.id, delServidor, ColaPendientes.desbloqueosPendientes(contexto, user.id)
+                    )
+                } else BloqueosLocales.leer(contexto, user.id)
             }
             cargandoDatos = false
+        }
+    }
+
+    // Acta #24: al volver la conexión se avisa y se actualiza solo la información
+    LaunchedEffect(EstadoRed.hayRed) {
+        if (!EstadoRed.hayRed) {
+            estuvoSinRed = true
+        } else if (estuvoSinRed) {
+            estuvoSinRed = false
+            conexionRestablecida = true
+            if (usuarioActual != null) recargarDatosGlobales()
+            kotlinx.coroutines.delay(3500)
+            conexionRestablecida = false
         }
     }
 
     fun cerrarSesionYVolverInicio() {
         SupabaseService.cerrarSesionToken()
         usuarioActual = null
+        // Nada de la cuenta anterior debe quedar en memoria para la siguiente persona que inicie sesión
+        solicitudesUsuario = emptyList()
+        avisosPendientes = emptyList()
+        bloqueados = emptyList()
+        trabajadorSeleccionado = null
+        solicitudEnSeguimiento = null
+        solicitudRecienConfirmada = null
+        reporteObjetivo = null
+        bloqueoObjetivo = null
+        mostrarCentroSeguridad = false
+        falloCarga = false
+        claveSolicitud.liberar()
+        clavePublicacion.liberar()
+        fotosProblemaSubidas.clear()
         pantallaActual = RutaHabilio.INICIO_ROL
     }
+
+    // Acta #25: bloquear a una persona (se aplica ya en el teléfono y se envía al servidor en cuanto se puede)
+    fun bloquearPersona(obj: ObjetivoReporte) {
+        val yo = usuarioActual ?: return
+        bloqueados = BloqueosLocales.agregar(contexto, yo.id, UsuarioBloqueado(obj.usuarioId, obj.nombre))
+        // Si quien bloquea es la persona especialista, las solicitudes pendientes de esa persona se rechazan
+        val pendientes = if (yo.rol == "trabajador") {
+            solicitudesUsuario.filter { it.clienteId == obj.usuarioId && it.estado == "pendiente" }
+        } else emptyList()
+        if (pantallaActual == RutaHabilio.DETALLE_ESPECIALISTA && trabajadorSeleccionado?.id == obj.usuarioId) {
+            pantallaActual = RutaHabilio.BUSCADOR_CLIENTE
+        }
+        scope.launch {
+            val enviado = SupabaseService.bloquearUsuario(contexto, yo.id, obj.usuarioId)
+            pendientes.forEach { SupabaseService.cambiarEstadoConEvento(it, "trabajador", "rechazado") }
+            if (pendientes.isNotEmpty()) recargarDatosGlobales()
+            mostrarAviso(
+                if (enviado) "Bloqueaste a ${obj.nombre}."
+                else "Bloqueaste a ${obj.nombre}. Se guardó en tu teléfono y se enviará cuando haya conexión."
+            )
+        }
+    }
+
+    // Acta #25: reportar una conducta inapropiada (si no hay conexión, el reporte queda guardado y se envía solo)
+    fun enviarReporteConducta(obj: ObjetivoReporte, motivo: String, detalle: String, tambienBloquear: Boolean) {
+        val yo = usuarioActual ?: return
+        scope.launch {
+            val llego = SupabaseService.reportarConducta(contexto, yo.id, obj, motivo, detalle)
+            mostrarAviso(
+                if (llego) "Reporte enviado al equipo de Habilio. Gracias por avisar."
+                else "Guardamos tu reporte en el teléfono y se enviará automáticamente cuando haya conexión."
+            )
+        }
+        if (tambienBloquear) bloquearPersona(obj)
+    }
+
+    val idsBloqueados = bloqueados.map { it.id }.toSet()
 
     BackHandler(enabled = pantallaActual != RutaHabilio.INICIO_ROL) {
         when (pantallaActual) {
@@ -249,6 +357,22 @@ fun HabilioApp() {
             )
         ) {
             Surface(modifier = Modifier.fillMaxSize(), color = HabilioTheme.FondoPrincipal) {
+                val hayBanner = !EstadoRed.hayRed || falloCarga || conexionRestablecida ||
+                    (cargandoDatos && usuarioActual != null)
+                Column(modifier = Modifier.fillMaxSize()) {
+                BannerConexion(
+                    sinRed = !EstadoRed.hayRed,
+                    falloCarga = falloCarga,
+                    mostrandoCopia = EstadoRed.copiaLocal,
+                    restablecida = conexionRestablecida,
+                    cargando = cargandoDatos && usuarioActual != null,
+                    alReintentar = { recargarDatosGlobales() }
+                )
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth().then(
+                        if (hayBanner) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier
+                    )
+                ) {
                 when (pantallaActual) {
                     RutaHabilio.INICIO_ROL -> PantallaInicioRol(
                         alElegirCliente = { pantallaActual = RutaHabilio.LOGIN_CLIENTE },
@@ -310,7 +434,7 @@ fun HabilioApp() {
                     )
 
                     RutaHabilio.BUSCADOR_CLIENTE -> PantallaBuscadorCliente(
-                        trabajadores = listaTrabajadores,
+                        trabajadores = listaTrabajadores.filter { it.id !in idsBloqueados },
                         evidencias = todasLasEvidencias,
                         resenas = todasLasResenas,
                         cargando = cargandoDatos,
@@ -361,7 +485,9 @@ fun HabilioApp() {
                                     recargarDatosGlobales()
                                     pantallaActual = RutaHabilio.PERFIL_CLIENTE
                                 },
-                                alReportarResena = { resenaAReportar = it }
+                                alReportarResena = { resenaAReportar = it },
+                                alReportarEspecialista = { reporteObjetivo = ObjetivoReporte(esp.id, esp.nombre, "", true) },
+                                alBloquearEspecialista = { bloqueoObjetivo = ObjetivoReporte(esp.id, esp.nombre, "", true) }
                             )
                         } else {
                             pantallaActual = RutaHabilio.BUSCADOR_CLIENTE
@@ -380,7 +506,7 @@ fun HabilioApp() {
                             solicitudEnSeguimiento = solicitud
                             pantallaActual = RutaHabilio.SEGUIMIENTO_SOLICITUD
                         },
-                        alLiberarPago = { solicitud ->
+                        alConfirmarCierreServicio = { solicitud ->
                             solicitudesUsuario = solicitudesUsuario.map {
                                 if (it.id == solicitud.id) it.copy(estado = "completado") else it
                             }
@@ -389,6 +515,8 @@ fun HabilioApp() {
                                 recargarDatosGlobales()
                             }
                         },
+                        alAbrirSeguridad = { mostrarCentroSeguridad = true },
+                        totalBloqueados = bloqueados.size,
                         alCalificarTrabajador = { solicitud ->
                             listaTrabajadores.find { it.id == solicitud.trabajadorId }?.let {
                                 trabajadorSeleccionado = it
@@ -429,6 +557,14 @@ fun HabilioApp() {
                                         mostrarModalCalificar = true
                                     }
                                 },
+                                usuarioId = usuarioActual?.id.orEmpty(),
+                                alReportarEspecialista = {
+                                    reporteObjetivo = ObjetivoReporte(solActual.trabajadorId, solActual.nombreTrabajador, solActual.id, true)
+                                },
+                                alBloquearEspecialista = {
+                                    bloqueoObjetivo = ObjetivoReporte(solActual.trabajadorId, solActual.nombreTrabajador, solActual.id, true)
+                                },
+                                alAbrirSeguridad = { mostrarCentroSeguridad = true },
                                 alVerPerfilTrabajador = {
                                     if (espAsociado != null) {
                                         trabajadorSeleccionado = espAsociado
@@ -443,7 +579,7 @@ fun HabilioApp() {
 
                     RutaHabilio.SOLICITUDES_TRABAJADOR -> PantallaSolicitudesTrabajador(
                         trabajador = usuarioActual,
-                        solicitudes = solicitudesUsuario,
+                        solicitudes = solicitudesUsuario.filter { !(it.clienteId in idsBloqueados && it.estado == "pendiente") },
                         cargando = cargandoDatos,
                         alRefrescar = { recargarDatosGlobales() },
                         alCambiarEstadoSolicitud = { solicitud, nuevoEstado ->
@@ -460,6 +596,10 @@ fun HabilioApp() {
                                 }
                             }
                         },
+                        usuarioId = usuarioActual?.id.orEmpty(),
+                        alReportarCliente = { s -> reporteObjetivo = ObjetivoReporte(s.clienteId, s.nombreCliente, s.id, false) },
+                        alBloquearCliente = { s -> bloqueoObjetivo = ObjetivoReporte(s.clienteId, s.nombreCliente, s.id, false) },
+                        alAbrirSeguridad = { mostrarCentroSeguridad = true },
                         alIrAMiTaller = {
                             recargarDatosGlobales()
                             pantallaActual = RutaHabilio.TALLER_TRABAJADOR
@@ -476,6 +616,8 @@ fun HabilioApp() {
                         alCambiarApariencia = ::actualizarApariencia,
                         alCambiarEscalaTexto = ::actualizarEscalaTexto,
                         alEditarPerfil = { pantallaActual = RutaHabilio.EDITAR_PERFIL },
+                        alAbrirSeguridad = { mostrarCentroSeguridad = true },
+                        totalBloqueados = bloqueados.size,
                         resenas = todasLasResenas.filter { it.trabajadorId == usuarioActual?.id },
                         alPublicarTrabajo = { nuevo, alProgreso, alTerminar ->
                             val t = usuarioActual
@@ -493,9 +635,17 @@ fun HabilioApp() {
                                         tipoServicio = nuevo.tipoServicio,
                                         fechaTrabajo = nuevo.fechaTrabajo,
                                         consentimientoImagenes = nuevo.consentimientoImagenes,
+                                        // Acta #24: mismo id mientras no cambie el contenido, para que reintentar no duplique
+                                        grupoId = clavePublicacion.para(
+                                            t.id + "|" + nuevo.titulo + "|" + nuevo.descripcion + "|" +
+                                                nuevo.fotos.joinToString(",") { it.etiqueta + it.uri }
+                                        ),
                                         onProgreso = alProgreso
                                     )
-                                    if (exito) recargarDatosGlobales()
+                                    if (exito) {
+                                        clavePublicacion.liberar()
+                                        recargarDatosGlobales()
+                                    }
                                     alTerminar(exito)
                                 }
                             }
@@ -537,11 +687,14 @@ fun HabilioApp() {
                         }
                     }
                 }
+                }
+                }
 
                 if (mostrarModalCompra && trabajadorSeleccionado != null) {
                     ModalSolicitarServicio(
                         trabajador = trabajadorSeleccionado!!,
                         direccionInicial = usuarioActual?.direccion ?: "",
+                        claveBorrador = "${usuarioActual?.id.orEmpty()}.${trabajadorSeleccionado!!.id}",
                         enviando = enviandoSolicitud,
                         mensajeEnvio = mensajeEnvioSolicitud,
                         alCerrar = { mostrarModalCompra = false; mensajeEnvioSolicitud = "" },
@@ -551,14 +704,20 @@ fun HabilioApp() {
                             scope.launch {
                                 enviandoSolicitud = true
                                 mensajeEnvioSolicitud = ""
+                                // Acta #24: misma clave mientras no cambie lo que se envía, así reintentar no duplica la solicitud
+                                val claveEnvio = claveSolicitud.para(
+                                    listOf(clienteId, trab.id, descripcion, ubicacion, presupuesto.toString(), esUrgente.toString(),
+                                        fotos.joinToString("|")).joinToString("#")
+                                )
                                 var urlsFotos = emptyList<String>()
                                 if (fotos.isNotEmpty()) {
-                                    val subidas = SupabaseService.subirFotosProblema(contexto, fotos) { listas, total ->
+                                    val subidas = SupabaseService.subirFotosProblema(contexto, fotos, fotosProblemaSubidas, claveEnvio) { listas, total ->
                                         mensajeEnvioSolicitud = "Subiendo fotos… $listas de $total"
                                     }
                                     if (subidas == null) {
                                         enviandoSolicitud = false
-                                        mensajeEnvioSolicitud = "No se pudieron subir las fotos. Revisa tu conexión e inténtalo de nuevo (tus datos no se perdieron)."
+                                        mensajeEnvioSolicitud = (EstadoRed.ultimoMensaje ?: "No se pudieron subir las fotos.") +
+                                            " Tus datos no se perdieron: las fotos que ya subieron no se repiten al reintentar."
                                         return@launch
                                     }
                                     urlsFotos = subidas
@@ -572,8 +731,12 @@ fun HabilioApp() {
                                     ubicacion = ubicacion,
                                     monto = presupuesto,
                                     esUrgente = esUrgente,
-                                    fotosProblema = urlsFotos
+                                    fotosProblema = urlsFotos,
+                                    claveEnvio = claveEnvio
                                 ).onSuccess { creada ->
+                                    claveSolicitud.liberar()
+                                    fotosProblemaSubidas.clear()
+                                    BorradorLocal(contexto, "solicitud.$clienteId.${trab.id}").borrar()
                                     SupabaseService.registrarEvento(creada.id, "cliente", TipoEvento.CREADA, "", trab.id)
                                     mostrarModalCompra = false
                                     mensajeEnvioSolicitud = ""
@@ -707,6 +870,52 @@ fun HabilioApp() {
                             resenaAReportar = null
                         }
                     )
+                }
+
+                reporteObjetivo?.let { obj ->
+                    DialogoReportarConducta(
+                        objetivo = obj,
+                        alCerrar = { reporteObjetivo = null },
+                        alEnviar = { motivo, detalle, tambienBloquear ->
+                            reporteObjetivo = null
+                            enviarReporteConducta(obj, motivo, detalle, tambienBloquear)
+                        }
+                    )
+                }
+
+                bloqueoObjetivo?.let { obj ->
+                    DialogoConfirmarBloqueo(
+                        objetivo = obj,
+                        quienBloqueaEsEspecialista = usuarioActual?.rol == "trabajador",
+                        alCerrar = { bloqueoObjetivo = null },
+                        alConfirmar = {
+                            bloqueoObjetivo = null
+                            bloquearPersona(obj)
+                        }
+                    )
+                }
+
+                if (mostrarCentroSeguridad) {
+                    usuarioActual?.let { u ->
+                        DialogoCentroSeguridad(
+                            usuarioId = u.id,
+                            esEspecialista = u.rol == "trabajador",
+                            bloqueados = bloqueados.map { b ->
+                                if (b.nombre == "Persona bloqueada") {
+                                    b.copy(
+                                        nombre = listaTrabajadores.find { it.id == b.id }?.nombre
+                                            ?: solicitudesUsuario.firstOrNull { it.clienteId == b.id }?.nombreCliente
+                                            ?: b.nombre
+                                    )
+                                } else b
+                            },
+                            alDesbloquear = { b ->
+                                bloqueados = BloqueosLocales.quitar(contexto, u.id, b.id)
+                                scope.launch { SupabaseService.desbloquearUsuario(contexto, u.id, b.id) }
+                            },
+                            alCerrar = { mostrarCentroSeguridad = false }
+                        )
+                    }
                 }
 
                 if (evidenciaEnPantallaCompleta != null) {

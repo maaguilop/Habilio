@@ -415,20 +415,31 @@ fun PantallaSeguimientoSolicitud(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                Button(
-                    onClick = alCancelarPedido,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = HabilioTheme.alturaMinima(52.dp)),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = HabilioTheme.RojoUrgente,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Cancelar pedido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                if (esperandoConfirmacion) {
+                    // El especialista ya marcó el trabajo como terminado: ya no se cancela.
+                    HabilioTarjeta(colorFondo = HabilioTheme.FondoAzulSuave, radioEsquina = 12.dp, paddingInterno = 12.dp) {
+                        Text(
+                            "El especialista marcó el trabajo como terminado, así que ya no se puede cancelar. " +
+                                "Si algo no quedó como se acordó, usa \"Reportar un desacuerdo\" en la sección de arriba.",
+                            fontSize = 13.sp, lineHeight = 18.sp, color = HabilioTheme.TextoPrimario
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = alCancelarPedido,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = HabilioTheme.alturaMinima(52.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = HabilioTheme.RojoUrgente,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Cancelar pedido", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    }
                 }
             } else if (pasoActual == 3) {
                 val yaEvaluada = solicitud.fueEvaluada

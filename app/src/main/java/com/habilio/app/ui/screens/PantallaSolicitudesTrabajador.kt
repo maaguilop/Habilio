@@ -233,7 +233,9 @@ fun PantallaSolicitudesTrabajador(
                                 onClick = { verAcuerdos = true },
                                 modifier = Modifier.weight(1f).heightIn(min = HabilioTheme.alturaMinima(44.dp))
                             ) { Text("Presupuesto e historial", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.AzulVerificado) }
-                            if (sol.estado == "en_ejecucion" || sol.estado == "esperando_confirmacion") {
+                            // Solo se puede cancelar mientras el trabajo está en ejecución. Una vez marcado como
+                            // terminado, la persona cliente confirma o se reporta un desacuerdo.
+                            if (sol.estado == "en_ejecucion") {
                                 TextButton(
                                     onClick = { alCambiarEstadoSolicitud(sol, "cancelada") },
                                     modifier = Modifier.weight(1f).heightIn(min = HabilioTheme.alturaMinima(44.dp))

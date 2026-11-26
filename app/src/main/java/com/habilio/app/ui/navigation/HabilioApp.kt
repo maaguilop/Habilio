@@ -273,23 +273,51 @@ fun HabilioApp() {
     }
 
     // Acta #25: bloquear a una persona (se aplica ya en el teléfono y se envía al servidor en cuanto se puede)
+    /** Solicitudes todavía abiertas (pendiente, en ejecución o esperando confirmación) con una persona. */
+    fun solicitudesAbiertasCon(usuarioId: String): List<SolicitudItem> =
+        solicitudesUsuario.filter {
+            (it.clienteId == usuarioId || it.trabajadorId == usuarioId) && it.estado in ESTADOS_SOLICITUD_ABIERTA
+        }
+
     fun bloquearPersona(obj: ObjetivoReporte) {
         val yo = usuarioActual ?: return
         bloqueados = BloqueosLocales.agregar(contexto, yo.id, UsuarioBloqueado(obj.usuarioId, obj.nombre))
-        // Si quien bloquea es la persona especialista, las solicitudes pendientes de esa persona se rechazan
-        val pendientes = if (yo.rol == "trabajador") {
-            solicitudesUsuario.filter { it.clienteId == obj.usuarioId && it.estado == "pendiente" }
-        } else emptyList()
+        // Bloquear también cierra TODAS las solicitudes abiertas con esa persona (sin importar quién bloquea).
+        // El motivo que verá la otra parte es neutral: no se le dice que fue bloqueada.
+        val abiertas = solicitudesAbiertasCon(obj.usuarioId)
+        val miRol = if (yo.rol == "trabajador") "trabajador" else "cliente"
+        val idsCerradas = abiertas.map { it.id }.toSet()
+        if (idsCerradas.isNotEmpty()) {
+            solicitudesUsuario = solicitudesUsuario.map {
+                if (it.id in idsCerradas) it.copy(estado = if (it.estado == "pendiente" && miRol == "trabajador") "rechazado" else "cancelada") else it
+            }
+            solicitudEnSeguimiento?.let { s ->
+                if (s.id in idsCerradas) solicitudEnSeguimiento = s.copy(estado = "cancelada")
+            }
+        }
         if (pantallaActual == RutaHabilio.DETALLE_ESPECIALISTA && trabajadorSeleccionado?.id == obj.usuarioId) {
             pantallaActual = RutaHabilio.BUSCADOR_CLIENTE
         }
         scope.launch {
             val enviado = SupabaseService.bloquearUsuario(contexto, yo.id, obj.usuarioId)
-            pendientes.forEach { SupabaseService.cambiarEstadoConEvento(it, "trabajador", "rechazado") }
-            if (pendientes.isNotEmpty()) recargarDatosGlobales()
+            var cerradas = 0
+            abiertas.forEach { sol ->
+                val ok = if (sol.estado == "pendiente" && miRol == "trabajador") {
+                    SupabaseService.cambiarEstadoConEvento(sol, "trabajador", "rechazado")
+                } else {
+                    SupabaseService.cancelarSolicitud(sol, miRol, "Solicitud cerrada por la otra persona", "")
+                }
+                if (ok) cerradas++
+            }
+            if (abiertas.isNotEmpty()) recargarDatosGlobales()
+            val textoCierre = when {
+                abiertas.isEmpty() -> ""
+                cerradas == abiertas.size -> if (cerradas == 1) " Se cerró 1 solicitud." else " Se cerraron $cerradas solicitudes."
+                else -> " No se pudieron cerrar ${abiertas.size - cerradas} solicitudes; revisa tu conexión y ciérralas desde la solicitud."
+            }
             mostrarAviso(
-                if (enviado) "Bloqueaste a ${obj.nombre}."
-                else "Bloqueaste a ${obj.nombre}. Se guardó en tu teléfono y se enviará cuando haya conexión."
+                (if (enviado) "Bloqueaste a ${obj.nombre}."
+                else "Bloqueaste a ${obj.nombre}. Se guardó en tu teléfono y se enviará cuando haya conexión.") + textoCierre
             )
         }
     }
@@ -304,7 +332,10 @@ fun HabilioApp() {
                 else "Guardamos tu reporte en el teléfono y se enviará automáticamente cuando haya conexión."
             )
         }
-        if (tambienBloquear) bloquearPersona(obj)
+        if (tambienBloquear) {
+            if (solicitudesAbiertasCon(obj.usuarioId).isEmpty()) bloquearPersona(obj)
+            else bloqueoObjetivo = obj // primero se muestra qué solicitudes se van a cerrar
+        }
     }
 
     val idsBloqueados = bloqueados.map { it.id }.toSet()
@@ -538,7 +569,11 @@ fun HabilioApp() {
                                 especialista = espAsociado,
                                 alVolver = { pantallaActual = RutaHabilio.PERFIL_CLIENTE },
                                 alRefrescar = { recargarDatosGlobales() },
-                                alCancelarPedido = { solicitudACancelar = solActual },
+                                alCancelarPedido = {
+                                    // Cuando el especialista ya marcó el trabajo como terminado no se cancela:
+                                    // se confirma o se reporta un desacuerdo
+                                    if (solActual.estado != "esperando_confirmacion") solicitudACancelar = solActual
+                                },
                                 alConfirmarCierre = {
                                     val actualizada = solActual.copy(estado = "completado")
                                     solicitudEnSeguimiento = actualizada
@@ -583,7 +618,10 @@ fun HabilioApp() {
                         cargando = cargandoDatos,
                         alRefrescar = { recargarDatosGlobales() },
                         alCambiarEstadoSolicitud = { solicitud, nuevoEstado ->
-                            if (nuevoEstado == "cancelada" || (nuevoEstado == "rechazado" && solicitud.estado != "pendiente")) {
+                            if ((nuevoEstado == "cancelada" || nuevoEstado == "rechazado") && solicitud.estado == "esperando_confirmacion") {
+                                // Trabajo ya marcado como terminado: no se puede cancelar ni rechazar
+                                mostrarAviso("El trabajo ya está marcado como terminado. Si hay un problema, usa \"Reportar un desacuerdo\" en Presupuesto e historial.")
+                            } else if (nuevoEstado == "cancelada" || (nuevoEstado == "rechazado" && solicitud.estado != "pendiente")) {
                                 // Acta #13: cancelar un servicio ya aceptado exige motivo y deja constancia
                                 solicitudACancelar = solicitud
                             } else {
@@ -887,6 +925,7 @@ fun HabilioApp() {
                     DialogoConfirmarBloqueo(
                         objetivo = obj,
                         quienBloqueaEsEspecialista = usuarioActual?.rol == "trabajador",
+                        solicitudesAbiertas = solicitudesAbiertasCon(obj.usuarioId),
                         alCerrar = { bloqueoObjetivo = null },
                         alConfirmar = {
                             bloqueoObjetivo = null

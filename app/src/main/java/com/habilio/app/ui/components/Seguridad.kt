@@ -221,56 +221,93 @@ fun DialogoReportarConducta(
 }
 
 /** Confirmación antes de bloquear: explica exactamente qué pasa y qué no. */
+/** Estados en los que una solicitud sigue abierta entre dos personas. */
+val ESTADOS_SOLICITUD_ABIERTA = setOf("pendiente", "en_ejecucion", "esperando_confirmacion")
+
+private fun nombreEstado(estado: String) = when (estado) {
+    "pendiente" -> "pendiente"
+    "en_ejecucion" -> "en ejecución"
+    "esperando_confirmacion" -> "esperando confirmación"
+    else -> estado
+}
+
+/**
+ * Confirmación antes de bloquear. Explica qué pasa y, si hay solicitudes abiertas con esa persona,
+ * las enumera y avisa que se van a cerrar, para que la persona confirme sabiendo lo que ocurrirá.
+ */
 @Composable
 fun DialogoConfirmarBloqueo(
     objetivo: ObjetivoReporte,
     quienBloqueaEsEspecialista: Boolean,
     alCerrar: () -> Unit,
-    alConfirmar: () -> Unit
+    alConfirmar: () -> Unit,
+    solicitudesAbiertas: List<SolicitudItem> = emptyList()
 ) {
-    val densidadApp = LocalDensity.current
-    AlertDialog(
-        onDismissRequest = alCerrar,
-        icon = { Icon(Icons.Default.Block, contentDescription = null, tint = HabilioTheme.RojoUrgente) },
-        title = {
-            CompositionLocalProvider(LocalDensity provides densidadApp) { Text("¿Bloquear a ${objetivo.nombre}?") }
-        },
-        text = {
-            CompositionLocalProvider(LocalDensity provides densidadApp) {
-            Column {
-                val efectos = buildList {
-                    if (quienBloqueaEsEspecialista) {
-                        add("No podrá enviarte nuevas solicitudes.")
-                        add("Sus solicitudes pendientes contigo se rechazarán.")
-                    } else {
-                        add("Dejarás de ver su perfil en las búsquedas.")
-                        add("No podrá recibir solicitudes tuyas por error.")
+    DialogoHabilio(onDismissRequest = alCerrar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        HabilioTarjeta(
+            radioEsquina = 24.dp, paddingInterno = 20.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                .heightIn(max = altoMaximoVentana()).verticalScroll(rememberScrollState())
+        ) {
+            EncabezadoModal(titulo = "¿Bloquear a ${objetivo.nombre}?", icono = Icons.Default.Block, alCerrar = alCerrar)
+
+            if (solicitudesAbiertas.isNotEmpty()) {
+                HabilioTarjeta(colorFondo = HabilioTheme.FondoRojoSuave, radioEsquina = 12.dp, paddingInterno = 12.dp) {
+                    Text(
+                        if (solicitudesAbiertas.size == 1) "Se cerrará 1 solicitud abierta con esta persona:"
+                        else "Se cerrarán ${solicitudesAbiertas.size} solicitudes abiertas con esta persona:",
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoPrimario,
+                        modifier = Modifier.semantics { heading() }
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    solicitudesAbiertas.forEach { s ->
+                        Text(
+                            "• ${s.oficioEtiqueta.ifBlank { "Servicio" }} (${nombreEstado(s.estado)})",
+                            fontSize = 13.sp, lineHeight = 18.sp, color = HabilioTheme.TextoPrimario
+                        )
                     }
-                    add("No se le avisará que la bloqueaste.")
-                    add("Puedes desbloquearla cuando quieras desde el Centro de seguridad.")
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Quedarán como canceladas en el historial. La otra persona verá que la solicitud se cerró, pero no que la bloqueaste.",
+                        fontSize = 12.sp, lineHeight = 17.sp, color = HabilioTheme.TextoSecundario
+                    )
                 }
-                efectos.forEach { Text("• $it", fontSize = 14.sp, lineHeight = 20.sp) }
+                Spacer(Modifier.height(12.dp))
             }
-            }
-        },
-        confirmButton = {
-            CompositionLocalProvider(LocalDensity provides densidadApp) {
-                TextButton(onClick = alConfirmar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                    Text("Bloquear", color = HabilioTheme.RojoUrgente, fontWeight = FontWeight.Bold)
+
+            Text("Además:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HabilioTheme.TextoPrimario)
+            Spacer(Modifier.height(4.dp))
+            val efectos = buildList {
+                if (quienBloqueaEsEspecialista) {
+                    add("No podrá enviarte nuevas solicitudes.")
+                } else {
+                    add("Dejarás de ver su perfil en las búsquedas.")
+                    add("No podrás enviarle solicitudes por error.")
                 }
+                add("No se le avisará que la bloqueaste.")
+                add("Puedes desbloquearla cuando quieras desde el Centro de seguridad (las solicitudes cerradas no se reabren).")
             }
-        },
-        dismissButton = {
-            CompositionLocalProvider(LocalDensity provides densidadApp) {
-                TextButton(onClick = alCerrar, modifier = Modifier.heightIn(min = HabilioTheme.alturaMinima(48.dp))) {
-                    Text("Cancelar", color = HabilioTheme.TextoPrimario)
-                }
+            efectos.forEach { Text("• $it", fontSize = 14.sp, lineHeight = 20.sp, color = HabilioTheme.TextoPrimario) }
+
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = alConfirmar,
+                modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(52.dp)),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = HabilioTheme.RojoUrgente, contentColor = Color.White)
+            ) {
+                Text(
+                    if (solicitudesAbiertas.isEmpty()) "Bloquear"
+                    else "Bloquear y cerrar ${if (solicitudesAbiertas.size == 1) "la solicitud" else "las solicitudes"}",
+                    fontWeight = FontWeight.ExtraBold
+                )
             }
-        },
-        containerColor = HabilioTheme.SuperficieTarjeta,
-        titleContentColor = HabilioTheme.TextoPrimario,
-        textContentColor = HabilioTheme.TextoPrimario
-    )
+            TextButton(
+                onClick = alCerrar,
+                modifier = Modifier.fillMaxWidth().heightIn(min = HabilioTheme.alturaMinima(48.dp))
+            ) { Text("No bloquear", color = HabilioTheme.TextoSecundario) }
+        }
+    }
 }
 
 /**

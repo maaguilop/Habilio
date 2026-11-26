@@ -101,6 +101,11 @@ fun PantallaTallerTrabajador(
     totalBloqueados: Int = 0
 ) {
     val contextoTaller = androidx.compose.ui.platform.LocalContext.current
+    // La calificación guardada en el perfil de la sesión puede estar desactualizada (se calcula en el servidor
+    // cada vez que llega una reseña); por eso se calcula aquí con las reseñas ya cargadas.
+    val calificacionPropia = remember(resenas, trabajador) {
+        if (resenas.isNotEmpty()) resenas.map { it.estrellas }.average() else (trabajador?.calificacion ?: 0.0)
+    }
     val scopeTaller = rememberCoroutineScope()
     // Acta #24: borrador local del trabajo (las fotos no se guardan: hay que elegirlas de nuevo)
     val borradorTrabajo = remember(trabajador?.id) { BorradorLocal(contextoTaller, "trabajo.${trabajador?.id.orEmpty()}") }
@@ -279,6 +284,14 @@ fun PantallaTallerTrabajador(
                                     fontWeight = FontWeight.SemiBold,
                                     color = HabilioTheme.AmarilloAcentoTexto
                                 )
+                                // Calificación propia: promedio de las reseñas visibles (igual que la calcula el servidor)
+                                Text(
+                                    text = if (resenas.isEmpty()) "☆ Aún sin reseñas"
+                                    else "★ ${String.format("%.1f", calificacionPropia)} · ${resenas.size} ${if (resenas.size == 1) "reseña" else "reseñas"}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (resenas.isEmpty()) HabilioTheme.TextoSecundario else HabilioTheme.AmarilloAcentoTexto
+                                )
                             }
                         }
                     },
@@ -345,7 +358,7 @@ fun PantallaTallerTrabajador(
                 Spacer(modifier = Modifier.height(16.dp))
             }
             if (trabajador != null) {
-                PanelInsignias(trabajador, evidencias, resenas)
+                PanelInsignias(trabajador.copy(calificacion = calificacionPropia), evidencias, resenas)
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
